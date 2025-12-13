@@ -13,7 +13,7 @@ This repository contains the helper library for Module 4: Modern Deep Learning A
 ```bash
 # Clone and navigate to API directory
 git clone <repository-url>
-cd "class activity and first part Practices for HW2/hello_world_genai"
+cd "hello_world_genai"
 
 # (optional)Recreate venv if it exists to avoid path conflicts issues like `No module named 'torch'` when running FastAPI )
 rm -rf .venv 2>/dev/null
