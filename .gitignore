@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.cursor
+.specstory
+.specstory/**
+.specstory-cache/**
+.specstory-cache-*/
+.specstory-cache-*/
+
+# Large dataset files
+data/cifar-10-python.tar.gz
