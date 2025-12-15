@@ -239,18 +239,6 @@ uv run python scripts/practice1_cnn.py
 
 ---
 
-## Development History
-
-| Date | Update |
-|------|--------|
-| 2025-12-13 | Added CIFAR-10 image classifier endpoint (Practice 2) |
-| 2025-12-13 | Created AssignmentCNN model and training script (Practice 1) |
-| 2025-12-13 | Built helper_lib for neural network projects |
-| 2025-12-12 | Added word embedding endpoints (HW1) |
-| 2025-09-18 | Initial FastAPI setup with BigramModel |
-
----
-
 ## Requirements
 
 - Python >= 3.12
