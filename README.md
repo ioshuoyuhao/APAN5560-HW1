@@ -27,6 +27,10 @@ uv pip install en-core-web-lg@https://github.com/explosion/spacy-models/releases
 uv run fastapi dev app/main.py
 ```
 
+**Access the API (uv):**
+- Swagger UI: http://127.0.0.1:8000/docs
+- API Root: http://127.0.0.1:8000
+
 ### Option 2: Run with Docker
 
 ```bash
@@ -35,9 +39,9 @@ docker build -t hello_world_genai .
 docker run -p 8000:8000 hello_world_genai
 ```
 
-**Access the API:**
-- Swagger UI: http://127.0.0.1:8000/docs
-- API Root: http://127.0.0.1:8000
+**Access the API (Docker):**
+- Swagger UI: http://localhost:8000/docs
+- API Root: http://localhost:8000
 
 ---
 
@@ -241,7 +245,7 @@ python scripts/train_ebm_cifar10.py
 
 ### Using Swagger UI
 
-1. Visit http://127.0.0.1:8000/docs
+1. Visit http://127.0.0.1:8000/docs ( Suppose you run API server by uv)
 2. Navigate to the desired section (Diffusion, EBM, GAN)
 3. Try the endpoints
 
