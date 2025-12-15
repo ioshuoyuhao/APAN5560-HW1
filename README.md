@@ -163,32 +163,9 @@ INFO:     Application startup complete.
 - **API Root**: http://127.0.0.1:8000
 - **ReDoc**: http://127.0.0.1:8000/redoc
 
-#### Test Image Classification
-
-1. Visit http://127.0.0.1:8000/docs
-2. Expand `POST /classify`
-3. Click "Try it out"
-4. Upload an image file
-5. Click "Execute"
-
-**Response Example:**
-```json
-{
-  "filename": "cat.jpg",
-  "predicted_class": "cat",
-  "confidence": 0.8542,
-  "top5_predictions": [
-    {"class": "cat", "probability": 0.8542},
-    {"class": "dog", "probability": 0.0823}
-  ]
-}
-```
-
-**CIFAR-10 Classes:** airplane, automobile, bird, cat, deer, dog, frog, horse, ship, truck
-
 ---
 
-## Docker Deployment
+## Run API by Docker Deployment 
 
 ```bash
 cd hello_world_genai
@@ -196,7 +173,8 @@ docker build -t hello_world_genai .
 docker run -p 8000:8000 hello_world_genai
 ```
 
-Visit: http://0.0.0.0:8000/docs
+Visit:
+- **Swagger UI**: http://0.0.0.0:8000/docs
 
 ---
 
