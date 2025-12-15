@@ -233,12 +233,7 @@ python scripts/train_ebm_cifar10.py
 ⚠️ **Training Time:**
 - Diffusion Model: ~1-2 hours on GPU, ~4-6 hours on CPU
 - EBM: ~2-4 hours on GPU (Langevin sampling is slow)
-
-💡 **Tips:**
-- Use GPU (CUDA/MPS) for faster training
-- Monitor loss curves for convergence
-- Adjust epochs based on available time
-
+**Note** I have commited the saved model weights file, no need retrain manually
 ---
 
 ## Testing the API
