@@ -1,8 +1,8 @@
-# Module 4 Class Activity & Assignment 2 Practices Codebase
+# Assignment 3: Image Generation - Generative Adversarial Networks
 
 APAN 5560 Applied Generative AI
 
-This repository contains the helper library for Module 4: Modern Deep Learning Architectures, and practice question implementation for HW2.
+This repository contains the FastAPI application with MNIST GAN for generating handwritten digits, built as part of Assignment 3
 
 ---
 
@@ -10,19 +10,25 @@ This repository contains the helper library for Module 4: Modern Deep Learning A
 
 > **Prerequisites:** Python 3.12+, [uv](https://docs.astral.sh/uv/) package manager
 
-```bash
-# Clone and navigate to API directory
-git clone <repository-url>
-cd "class activity and first part Practices for HW2/hello_world_genai"
+### Option 1: Run with uv
 
-# (optional)Recreate venv if it exists to avoid path conflicts issues like `No module named 'torch'` when running FastAPI )
-rm -rf .venv 2>/dev/null
-# install dependencies
-uv sync
-uv pip install en-core-web-lg@https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl
+```bash
+# Navigate to project directory
+cd hello_world_genai
+
+# (Optional) Recreate venv if has env path conflict
+rm -rf .venv && uv venv && uv sync
 
 # Run the API
 uv run fastapi dev app/main.py
+```
+
+### Option 2: Run with Docker
+
+```bash
+cd hello_world_genai
+docker build -t hello_world_genai .
+docker run -p 8000:8000 hello_world_genai
 ```
 
 **Access the API:**
@@ -37,7 +43,7 @@ uv run fastapi dev app/main.py
 hello_world_genai/
 │
 ├── README.md                           # This file
-├── pyproject.toml                      # Dependencies
+├── pyproject.toml                      # Dependencies (v0.3.0)
 ├── uv.lock                             # Dependency lock file
 ├── Dockerfile                          # Docker configuration
 ├── .gitignore                          # Git ignore rules
@@ -45,60 +51,69 @@ hello_world_genai/
 │
 ├── app/                                # FastAPI Application
 │   ├── __init__.py
-│   ├── main.py                         # FastAPI endpoints
-│   ├── bigram_model.py                 # Bigram text generation (HW1)
-│   ├── embedding_model.py              # Word embeddings (HW1)
-│   └── classifier_model.py             # CIFAR-10 image classifier (HW2)
+│   ├── main.py                         # FastAPI endpoints (all features)
+│   ├── bigram_model.py                 # Bigram text generation
+│   ├── embedding_model.py              # Word embeddings
+│   ├── classifier_model.py             # CIFAR-10 image classifier
+│   └── gan_model.py                    # MNIST GAN generator (Assignment 3)
 │
 ├── helper_lib/                         # Reusable Neural Network Helper Library
 │   ├── __init__.py                     # Package initialization
-│   ├── data_loader.py                  # get_data_loader() - CIFAR-10 data loading
-│   ├── model.py                        # get_model() - MLP, CNN, EnhancedCNN, AssignmentCNN
-│   ├── trainer.py                      # train_model() - Training loop
-│   ├── evaluator.py                    # evaluate_model() - Model evaluation
-│   └── utils.py                        # save_model(), load_model() - Utilities
+│   ├── data_loader.py                  # get_data_loader(), get_mnist_data_loader()
+│   ├── model.py                        # get_model() - MLP, CNN, VAE, GAN, MNISTGAN
+│   ├── trainer.py                      # train_model(), train_mnist_gan()
+│   ├── evaluator.py                    # evaluate_model()
+│   ├── generator.py                    # generate_samples(), generate_mnist_gan_samples()
+│   └── utils.py                        # save_model(), load_model()
 │
-├── scripts/                            # Training and utility scripts
-│   └── practice1_cnn.py                # Practice 1: CNN training script
+├── scripts/                            # Training scripts
+│   ├── practice1_cnn.py                # CNN training script (Assignment 2)
+│   └── train_mnist_gan.py              # MNIST GAN training script (Assignment 3)
 │
 ├── models/                             # Trained model weights
-│   └── assignment_cnn.pth              # Trained CNN model (~3.2MB)
+│   ├── assignment_cnn.pth              # Trained CNN model
+│   ├── mnist_gan.pth                   # Full MNIST GAN model (Assignment 3)
+│   └── mnist_gan_generator.pth         # MNIST GAN generator only (Assignment 3)
 │
 └── data/                               # Dataset storage
-    ├── cifar-10-python.tar.gz          # CIFAR-10 dataset archive
-    └── cifar-10-batches-py/            # Extracted CIFAR-10 dataset
-        ├── batches.meta
-        ├── data_batch_1
-        ├── data_batch_2
-        ├── data_batch_3
-        ├── data_batch_4
-        ├── data_batch_5
-        ├── test_batch
-        └── readme.html
+    ├── MNIST/                          # MNIST dataset (auto-downloaded for Assignment 3)
+    └── cifar-10-batches-py/            # CIFAR-10 dataset
 ```
 
 ---
 
-## Practice 1: CNN Architecture
+## Assignment 3: Image Generation using GAN Architecture
 
-Implements a CNN matching the assignment specification:
+Implements a GAN matching the assignment specification for MNIST digit generation:
 
-**Architecture:**
-- Input: RGB image 64×64×3
-- Conv2D: 16 filters, 3×3, stride 1, padding 1 → ReLU → MaxPool 2×2
-- Conv2D: 32 filters, 3×3, stride 1, padding 1 → ReLU → MaxPool 2×2
-- Flatten → FC(100) → ReLU → FC(10)
+### Generator Architecture
+- **Input:** Noise vector of shape (BATCH_SIZE, 100)
+- **FC Layer:** 100 → 7×7×128, then reshape to (128, 7, 7)
+- **ConvTranspose2D:** 128 → 64, kernel 4, stride 2, padding 1 + BatchNorm + ReLU → 14×14
+- **ConvTranspose2D:** 64 → 1, kernel 4, stride 2, padding 1 + Tanh → 28×28
+- **Output:** 28×28 grayscale image
+
+### Discriminator Architecture
+- **Input:** Image of shape (1, 28, 28)
+- **Conv2D:** 1 → 64, kernel 4, stride 2, padding 1 + LeakyReLU(0.2) → 14×14
+- **Conv2D:** 64 → 128, kernel 4, stride 2, padding 1 + BatchNorm + LeakyReLU(0.2) → 7×7
+- **Flatten + Linear:** 6272 → 1
+- **Output:** Real/Fake probability
 
 ---
 
-## Practice 2: Model Deployment (API)
+## API Endpoints
 
-FastAPI application with endpoints for:
-- Bigram text generation
-- Word embeddings & similarity
-- **CIFAR-10 image classification** (HW2)
+### GAN Endpoints (Assignment 3)
 
-### API Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/gan/generate` | POST | Generate 1-64 handwritten digit images (base64) |
+| `/gan/generate/grid` | GET | Generate a grid of digit images |
+| `/gan/generate/image` | GET | Generate single digit image (PNG) |
+| `/gan/info` | GET | Get GAN model architecture info |
+
+### Other Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -106,148 +121,90 @@ FastAPI application with endpoints for:
 | `/generate` | POST | Generate text using bigram model |
 | `/embedding` | POST | Get word embedding vector |
 | `/similarity` | POST | Calculate text similarity |
-| `/vector-arithmetic` | POST | Perform vector arithmetic |
-| `/classify` | POST | **Classify image (CIFAR-10)** |
-| `/classify/classes` | GET | **Get CIFAR-10 class names** |
+| `/classify` | POST | Classify image (CIFAR-10) |
+| `/classify/classes` | GET | Get CIFAR-10 class names |
 
 ---
 
-## Model Training Process for reference (IF you want to Re-train the model)
+## Model Training (Optional)
 
-### Step 1: Train the CNN Model
+> **Note:** If `models/mnist_gan_generator.pth` already exists, you can skip training and run the API directly.
 
-> **Note:** If `models/assignment_cnn.pth` exists, u can skip to Step 2.
+### Train MNIST GAN
 
 ```bash
-uv run python scripts/practice1_cnn.py
+cd hello_world_genai
+uv run python scripts/train_mnist_gan.py
 ```
 
 This will:
-- Download CIFAR-10 dataset (if not exists)
-- Resize images to 64×64
-- Train the AssignmentCNN model for 10 epochs
-- Save the model to `./models/assignment_cnn.pth`
+- Download MNIST dataset (if not exists)
+- Train the MNISTGAN model for 20 epochs
+- Save models to:
+  - `./models/mnist_gan.pth` (full model)
+  - `./models/mnist_gan_generator.pth` (generator only for API)
 
 **Expected output:**
 ```
+============================================================
+Assignment 3: MNIST GAN Training
+============================================================
+[Epoch 1/20] [Batch 0/469] [D loss: 1.3863] [G loss: 0.6931]
+...
 Training Complete!
-Final Test Accuracy: ~65%
-Model saved to ./models/assignment_cnn.pth
+Model saved to: ./models/mnist_gan.pth
+Generator saved to: ./models/mnist_gan_generator.pth
+============================================================
 ```
 
-### Step 2: Install API Dependencies
+---
 
-```bash
-cd hello_world_genai
-rm -rf .venv 2>/dev/null   # Remove existing venv to avoid path conflicts if needed (optional)
-uv sync
-uv pip install en-core-web-lg@https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl
-```
+## Testing the API
 
-### Step 3: Run the API
-
-```bash
-uv run fastapi dev app/main.py
-```
-
-**Expected output:**
-```
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     Application startup complete.
-```
-
-### Step 4: Test the API
-
-- **Swagger UI**: http://127.0.0.1:8000/docs
-- **API Root**: http://127.0.0.1:8000
-- **ReDoc**: http://127.0.0.1:8000/redoc
-
-#### Test Image Classification
+### Using Swagger UI
 
 1. Visit http://127.0.0.1:8000/docs
-2. Expand `POST /classify`
-3. Click "Try it out"
-4. Upload an image file
-5. Click "Execute"
+2. Navigate to **GAN** section
+3. Try these endpoints:
 
-**Response Example:**
+#### Generate Single Image (PNG)
+- Expand `GET /gan/generate/image`
+- Click "Try it out" → "Execute"
+- The generated digit image will display directly
+
+#### Generate Image Grid
+- Expand `GET /gan/generate/grid`
+- Set `num_samples=16`, `nrow=4`
+- Click "Execute"
+- Response contains base64-encoded grid image
+
+#### Generate Multiple Images
+- Expand `POST /gan/generate`
+- Set request body: `{"num_samples": 10}`
+- Click "Execute"
+- Response contains list of base64-encoded images
+
+### Using curl
+
+```bash
+# Generate single image (saves as PNG)
+curl http://127.0.0.1:8000/gan/generate/image --output generated_digit.png
+
+# Generate grid (returns JSON with base64)
+curl "http://127.0.0.1:8000/gan/generate/grid?num_samples=16&nrow=4"
+
+# Get GAN model info
+curl http://127.0.0.1:8000/gan/info
+```
+
+**Response Example (POST /gan/generate):**
 ```json
 {
-  "filename": "cat.jpg",
-  "predicted_class": "cat",
-  "confidence": 0.8542,
-  "top5_predictions": [
-    {"class": "cat", "probability": 0.8542},
-    {"class": "dog", "probability": 0.0823}
-  ]
+  "num_samples": 1,
+  "latent_dim": 100,
+  "images": ["iVBORw0KGgoAAAANSUhEUgAAABwAAAAcCAAAAAB..."]
 }
 ```
-
-**CIFAR-10 Classes:** airplane, automobile, bird, cat, deer, dog, frog, horse, ship, truck
-
----
-
-## Docker Deployment
-
-```bash
-cd hello_world_genai
-docker build -t hello_world_genai .
-docker run -p 8000:8000 hello_world_genai
-```
-
-Visit: http://0.0.0.0:8000/docs
-
----
-
-## Troubleshooting
-
-### Issue: `No module named 'torch'` when running FastAPI
-
-**Cause:** The `.venv` may have hardcoded path that mismatch to your local machine
-
-**Solution:** Recreate the virtual environment:
-```bash
-cd hello_world_genai
-rm -rf .venv
-uv sync
-uv pip install en-core-web-lg@https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl
-uv run fastapi dev app/main.py
-```
-
-### Issue: `Can't find model 'en_core_web_lg'`
-
-**Solution:** Install spaCy model:
-```bash
-uv pip install en-core-web-lg@https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl
-```
-
-### Issue: `Address already in use` on port 8000
-
-**Solution:** Use different port or kill processes:
-```bash
-uv run fastapi dev app/main.py --port 8001
-# or
-pkill -f "uvicorn app.main"
-```
-
-### Issue: Model file not found (`assignment_cnn.pth`)
-
-**Solution:** Train the model first:
-```bash
-uv run python scripts/practice1_cnn.py
-```
-
----
-
-## Development History
-
-| Date | Update |
-|------|--------|
-| 2025-12-13 | Added CIFAR-10 image classifier endpoint (Practice 2) |
-| 2025-12-13 | Created AssignmentCNN model and training script (Practice 1) |
-| 2025-12-13 | Built helper_lib for neural network projects |
-| 2025-12-12 | Added word embedding endpoints (HW1) |
-| 2025-09-18 | Initial FastAPI setup with BigramModel |
 
 ---
 
@@ -258,6 +215,5 @@ uv run python scripts/practice1_cnn.py
 - PyTorch >= 2.0.0
 - torchvision >= 0.15.0
 - FastAPI
-- spaCy (for embedding endpoints)
-- Pillow (for image processing)
-
+- matplotlib >= 3.7.0
+- Pillow
