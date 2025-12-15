@@ -7,6 +7,7 @@ This repository contains the FastAPI application that use the MNIST dataset to t
 ---
 
 ## Quick Start
+### (Please refer to troubleshooting section at the buttom when encounting running FastAPI server issues like dependencies missing)
 
 > **Prerequisites:** Python 3.12+, [uv](https://docs.astral.sh/uv/) package manager
 
@@ -18,6 +19,7 @@ cd hello_world_genai
 
 # (Optional) Recreate venv if has env path conflict
 rm -rf .venv && uv venv && uv sync
+uv pip install en-core-web-lg@https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl
 
 # Run the API
 uv run fastapi dev app/main.py
