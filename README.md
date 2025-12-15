@@ -208,6 +208,36 @@ curl http://127.0.0.1:8000/gan/info
 
 ---
 
+## Troubleshooting
+
+### Issue: `No module named 'torch'` when running FastAPI
+
+**Cause:** The `.venv` may have hardcoded path that mismatch to your local machine
+
+**Solution:** Recreate the virtual environment:
+```bash
+cd hello_world_genai
+rm -rf .venv
+uv sync
+uv pip install en-core-web-lg@https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl
+uv run fastapi dev app/main.py
+```
+
+### Issue: `Can't find model 'en_core_web_lg'`
+
+**Solution:** Install spaCy model:
+```bash
+uv pip install en-core-web-lg@https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl
+```
+
+### Issue: `Address already in use` on port 8000
+
+**Solution:** Use different port or kill processes:
+```bash
+uv run fastapi dev app/main.py --port 8001
+
+---
+
 ## Requirements
 
 - Python >= 3.12
