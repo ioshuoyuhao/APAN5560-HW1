@@ -6,7 +6,8 @@ This repository contains the helper library for Module 4: Modern Deep Learning A
 
 ---
 
-## Quick Start
+## Quick Start 
+### (Please refer to troubleshooting section at the buttom when encounting running FastAPI server issues like dependencies missing)
 
 > **Prerequisites:** Python 3.12+, [uv](https://docs.astral.sh/uv/) package manager
 
