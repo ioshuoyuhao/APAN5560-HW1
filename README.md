@@ -36,7 +36,7 @@ uv sync
 ### Download spaCy Model
 
 ```bash
-python -m spacy download en_core_web_lg
+uv pip install en-core-web-lg@https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl
 ```
 
 ## API Endpoints
