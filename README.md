@@ -149,10 +149,3 @@ visit:
 server   Server started at http://0.0.0.0:8000
 server   Documentation at http://0.0.0.0:8000/docs
 
-## Development History
-
-| Date | Update |
-|------|--------|
-| 2025-12-12 | Added word embedding endpoints (HW1) |
-| 2025-09-18 | Initial setup with FastAPI and BigramModel |
-
