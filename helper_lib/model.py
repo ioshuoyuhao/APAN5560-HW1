@@ -1,12 +1,14 @@
 """
 Model Module
-Define neural network models: FCNN (MLP), CNN (SimpleCNN), EnhancedCNN, ResNet18, AssignmentCNN, VAE, GAN, MNISTGAN.
+Define neural network models: FCNN (MLP), CNN (SimpleCNN), EnhancedCNN, ResNet18, AssignmentCNN, VAE, GAN, MNISTGAN, Diffusion.
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import resnet18
+import math
+import copy
 
 
 class MLP(nn.Module):
@@ -505,16 +507,585 @@ class MNISTGAN(nn.Module):
         return self.generator(z)
 
 
+# ============================================================================
+# Diffusion Model Components (Module 8)
+# ============================================================================
+
+def linear_diffusion_schedule(diffusion_times, min_rate=1e-4, max_rate=0.02):
+    """
+    Linear diffusion schedule.
+    
+    Args:
+        diffusion_times: Tensor of shape (T,) with values in [0, 1)
+        min_rate: Minimum beta value
+        max_rate: Maximum beta value
+    
+    Returns:
+        noise_rates: Tensor of shape (T,)
+        signal_rates: Tensor of shape (T,)
+    """
+    diffusion_times = diffusion_times.to(dtype=torch.float32)
+    betas = min_rate + diffusion_times * (max_rate - min_rate)
+    alphas = 1.0 - betas
+    alpha_bars = torch.cumprod(alphas, dim=0)
+    signal_rates = torch.sqrt(alpha_bars)
+    noise_rates = torch.sqrt(1.0 - alpha_bars)
+    return noise_rates, signal_rates
+
+
+def cosine_diffusion_schedule(diffusion_times):
+    """
+    Cosine diffusion schedule.
+    Starts clear (slow noise growth), then rapidly blurs near the end.
+    
+    Args:
+        diffusion_times: Tensor with values in [0, 1]
+    
+    Returns:
+        noise_rates, signal_rates
+    """
+    signal_rates = torch.cos(diffusion_times * math.pi / 2)
+    noise_rates = torch.sin(diffusion_times * math.pi / 2)
+    return noise_rates, signal_rates
+
+
+def offset_cosine_diffusion_schedule(diffusion_times, min_signal_rate=0.02, max_signal_rate=0.95):
+    """
+    Offset cosine diffusion schedule. Avoids extreme values.
+    
+    Args:
+        diffusion_times: Tensor with values in [0, 1]
+        min_signal_rate: Minimum signal rate
+        max_signal_rate: Maximum signal rate
+    
+    Returns:
+        noise_rates, signal_rates
+    """
+    original_shape = diffusion_times.shape
+    diffusion_times_flat = diffusion_times.flatten()
+
+    start_angle = torch.acos(torch.tensor(max_signal_rate, dtype=torch.float32, device=diffusion_times.device))
+    end_angle = torch.acos(torch.tensor(min_signal_rate, dtype=torch.float32, device=diffusion_times.device))
+
+    diffusion_angles = start_angle + diffusion_times_flat * (end_angle - start_angle)
+
+    signal_rates = torch.cos(diffusion_angles).reshape(original_shape)
+    noise_rates = torch.sin(diffusion_angles).reshape(original_shape)
+
+    return noise_rates, signal_rates
+
+
+class SinusoidalEmbedding(nn.Module):
+    """
+    Sinusoidal embedding for encoding noise variance in diffusion models.
+    """
+    def __init__(self, num_frequencies=16):
+        super().__init__()
+        self.num_frequencies = num_frequencies
+        frequencies = torch.exp(torch.linspace(math.log(1.0), math.log(1000.0), num_frequencies))
+        self.register_buffer("angular_speeds", 2.0 * math.pi * frequencies.view(1, 1, 1, -1))
+
+    def forward(self, x):
+        """
+        Args:
+            x: Tensor of shape (B, 1, 1, 1)
+        Returns:
+            Tensor of shape (B, 1, 1, 2 * num_frequencies)
+        """
+        x = x.expand(-1, 1, 1, self.num_frequencies)
+        sin_part = torch.sin(self.angular_speeds * x)
+        cos_part = torch.cos(self.angular_speeds * x)
+        return torch.cat([sin_part, cos_part], dim=-1)
+
+
+class DiffusionResidualBlock(nn.Module):
+    """Residual block for UNet in diffusion models."""
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.needs_projection = in_channels != out_channels
+        if self.needs_projection:
+            self.proj = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+        else:
+            self.proj = nn.Identity()
+
+        self.norm = nn.BatchNorm2d(in_channels, affine=False)
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+
+    def swish(self, x):
+        return x * torch.sigmoid(x)
+
+    def forward(self, x):
+        residual = self.proj(x)
+        x = self.swish(self.conv1(x))
+        x = self.conv2(x)
+        return x + residual
+
+
+class DiffusionDownBlock(nn.Module):
+    """Down-sampling block for UNet in diffusion models."""
+    def __init__(self, width, block_depth, in_channels):
+        super().__init__()
+        self.blocks = nn.ModuleList()
+        for i in range(block_depth):
+            self.blocks.append(DiffusionResidualBlock(in_channels, width))
+            in_channels = width
+        self.pool = nn.AvgPool2d(kernel_size=2)
+
+    def forward(self, x, skips):
+        for block in self.blocks:
+            x = block(x)
+            skips.append(x)
+        x = self.pool(x)
+        return x
+
+
+class DiffusionUpBlock(nn.Module):
+    """Up-sampling block for UNet in diffusion models."""
+    def __init__(self, width, block_depth, in_channels):
+        super().__init__()
+        self.blocks = nn.ModuleList()
+        for _ in range(block_depth):
+            self.blocks.append(DiffusionResidualBlock(in_channels + width, width))
+            in_channels = width
+
+    def forward(self, x, skips):
+        x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=False)
+        for block in self.blocks:
+            skip = skips.pop()
+            x = torch.cat([x, skip], dim=1)
+            x = block(x)
+        return x
+
+
+class UNet(nn.Module):
+    """
+    UNet architecture for diffusion models.
+    
+    Args:
+        image_size: Size of input images (assumes square)
+        num_channels: Number of image channels (1 for grayscale, 3 for RGB)
+        embedding_dim: Dimension of noise embedding
+    """
+    def __init__(self, image_size, num_channels, embedding_dim=32):
+        super().__init__()
+        self.initial = nn.Conv2d(num_channels, 32, kernel_size=1)
+        self.num_channels = num_channels
+        self.image_size = image_size
+        self.embedding_dim = embedding_dim
+        self.embedding = SinusoidalEmbedding(num_frequencies=16)
+        self.embedding_proj = nn.Conv2d(embedding_dim, 32, kernel_size=1)
+
+        self.down1 = DiffusionDownBlock(32, in_channels=64, block_depth=2)
+        self.down2 = DiffusionDownBlock(64, in_channels=32, block_depth=2)
+        self.down3 = DiffusionDownBlock(96, in_channels=64, block_depth=2)
+
+        self.mid1 = DiffusionResidualBlock(in_channels=96, out_channels=128)
+        self.mid2 = DiffusionResidualBlock(in_channels=128, out_channels=128)
+
+        self.up1 = DiffusionUpBlock(96, in_channels=128, block_depth=2)
+        self.up2 = DiffusionUpBlock(64, block_depth=2, in_channels=96)
+        self.up3 = DiffusionUpBlock(32, block_depth=2, in_channels=64)
+
+        self.final = nn.Conv2d(32, num_channels, kernel_size=1)
+        nn.init.zeros_(self.final.weight)
+
+    def forward(self, noisy_images, noise_variances):
+        skips = []
+        x = self.initial(noisy_images)
+        noise_emb = self.embedding(noise_variances)
+        noise_emb = F.interpolate(noise_emb.permute(0, 3, 1, 2), size=(self.image_size, self.image_size), mode='nearest')
+        x = torch.cat([x, noise_emb], dim=1)
+
+        x = self.down1(x, skips)
+        x = self.down2(x, skips)
+        x = self.down3(x, skips)
+
+        x = self.mid1(x)
+        x = self.mid2(x)
+
+        x = self.up1(x, skips)
+        x = self.up2(x, skips)
+        x = self.up3(x, skips)
+
+        return self.final(x)
+
+
+class DiffusionModel(nn.Module):
+    """
+    Diffusion Model wrapper with training and generation capabilities.
+    
+    Args:
+        model: UNet backbone network
+        schedule_fn: Diffusion schedule function (e.g., offset_cosine_diffusion_schedule)
+    """
+    def __init__(self, model, schedule_fn=None):
+        super().__init__()
+        self.network = model
+        # EMA network for more stable sampling
+        self.ema_network = copy.deepcopy(model)
+        self.ema_network.eval()
+        self.ema_decay = 0.8
+        self.schedule_fn = schedule_fn if schedule_fn else offset_cosine_diffusion_schedule
+        self.normalizer_mean = 0.0
+        self.normalizer_std = 1.0
+        self.image_size = model.image_size
+        self.num_channels = model.num_channels
+
+    def to(self, device):
+        super().to(device)
+        self.ema_network.to(device)
+        return self
+
+    def set_normalizer(self, mean, std):
+        """Set normalization parameters for denormalization during generation."""
+        self.normalizer_mean = mean
+        self.normalizer_std = std
+
+    def denormalize(self, x):
+        """Denormalize images back to [0, 1] range."""
+        return torch.clamp(x * self.normalizer_std + self.normalizer_mean, 0.0, 1.0)
+
+    def denoise(self, noisy_images, noise_rates, signal_rates, training):
+        """Denoise images using the network."""
+        if training:
+            network = self.network
+            network.train()
+        else:
+            network = self.ema_network
+            network.eval()
+
+        pred_noises = network(noisy_images, noise_rates ** 2)
+        pred_images = (noisy_images - noise_rates * pred_noises) / signal_rates
+        return pred_noises, pred_images
+
+    def reverse_diffusion(self, initial_noise, diffusion_steps):
+        """Generate images by reversing the diffusion process."""
+        step_size = 1.0 / diffusion_steps
+        current_images = initial_noise
+
+        for step in range(diffusion_steps):
+            t = torch.ones((initial_noise.shape[0], 1, 1, 1), device=initial_noise.device) * (1 - step * step_size)
+            noise_rates, signal_rates = self.schedule_fn(t)
+            pred_noises, pred_images = self.denoise(current_images, noise_rates, signal_rates, training=False)
+
+            next_diffusion_times = t - step_size
+            next_noise_rates, next_signal_rates = self.schedule_fn(next_diffusion_times)
+            current_images = next_signal_rates * pred_images + next_noise_rates * pred_noises
+
+        return pred_images
+
+    def generate(self, num_images, diffusion_steps, image_size=None, initial_noise=None):
+        """Generate new images from random noise."""
+        if image_size is None:
+            image_size = self.image_size
+        if initial_noise is None:
+            initial_noise = torch.randn(
+                (num_images, self.num_channels, image_size, image_size),
+                device=next(self.parameters()).device
+            )
+        with torch.no_grad():
+            return self.denormalize(self.reverse_diffusion(initial_noise, diffusion_steps))
+
+    def train_step(self, images, optimizer, loss_fn):
+        """Single training step."""
+        images = (images - self.normalizer_mean) / self.normalizer_std
+        noises = torch.randn_like(images)
+
+        diffusion_times = torch.rand((images.size(0), 1, 1, 1), device=images.device)
+        noise_rates, signal_rates = self.schedule_fn(diffusion_times)
+        noisy_images = signal_rates * images + noise_rates * noises
+
+        pred_noises, _ = self.denoise(noisy_images, noise_rates, signal_rates, training=True)
+        loss = loss_fn(pred_noises, noises)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # Update EMA network
+        with torch.no_grad():
+            for ema_param, param in zip(self.ema_network.parameters(), self.network.parameters()):
+                ema_param.copy_(self.ema_decay * ema_param + (1. - self.ema_decay) * param)
+
+        return loss.item()
+
+    def test_step(self, images, loss_fn):
+        """Single validation step."""
+        images = (images - self.normalizer_mean) / self.normalizer_std
+        noises = torch.randn_like(images)
+
+        diffusion_times = torch.rand((images.size(0), 1, 1, 1), device=images.device)
+        noise_rates, signal_rates = self.schedule_fn(diffusion_times)
+        noisy_images = signal_rates * images + noise_rates * noises
+
+        with torch.no_grad():
+            pred_noises, _ = self.denoise(noisy_images, noise_rates, signal_rates, training=False)
+            loss = loss_fn(pred_noises, noises)
+
+        return loss.item()
+
+
+# ============================================================================
+# Energy-Based Model (EBM) Components (For Assignment 4)
+# ============================================================================
+
+def swish(x):
+    """Swish activation function - smooth alternative to ReLU."""
+    return x * torch.sigmoid(x)
+
+
+class EnergyModel(nn.Module):
+    """
+    Energy-Based Model neural network.
+    Maps input images to a scalar energy value.
+    Uses swish activation for smooth gradients during Langevin sampling.
+    
+    Args:
+        num_channels: Number of input channels (1 for grayscale, 3 for RGB)
+        image_size: Size of input images (default: 32)
+    
+    Output: Scalar energy value
+    """
+    def __init__(self, num_channels=1, image_size=32):
+        super(EnergyModel, self).__init__()
+        self.num_channels = num_channels
+        self.image_size = image_size
+        
+        self.conv1 = nn.Conv2d(num_channels, 16, kernel_size=5, stride=2, padding=2)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1)
+        self.conv3 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)
+        self.conv4 = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1)
+        
+        self.flatten = nn.Flatten()
+        # Calculate flattened size based on image_size (after 4 stride-2 convolutions: size/16)
+        final_size = image_size // 16
+        self.fc1 = nn.Linear(64 * final_size * final_size, 64)
+        self.fc2 = nn.Linear(64, 1)
+
+    def forward(self, x):
+        x = swish(self.conv1(x))
+        x = swish(self.conv2(x))
+        x = swish(self.conv3(x))
+        x = swish(self.conv4(x))
+        x = self.flatten(x)
+        x = swish(self.fc1(x))
+        return self.fc2(x)
+
+
+class EBMBuffer:
+    """
+    Sample buffer for efficient EBM training.
+    Stores generated samples to avoid starting from scratch each time.
+    """
+    def __init__(self, model, device, buffer_size=128, image_size=32, num_channels=1):
+        self.model = model
+        self.device = device
+        self.image_size = image_size
+        self.num_channels = num_channels
+        # Start with random images in the buffer
+        self.examples = [
+            torch.rand((1, num_channels, image_size, image_size), device=device) * 2 - 1 
+            for _ in range(buffer_size)
+        ]
+    
+    def sample_new_examples(self, batch_size, generate_fn, steps, step_size, noise_std):
+        """Sample new examples using Langevin dynamics."""
+        import random
+        import numpy as np
+        
+        n_new = np.random.binomial(batch_size, 0.05)  # ~5% new random images
+        
+        # Generate new random images
+        new_rand_imgs = torch.rand(
+            (n_new, self.num_channels, self.image_size, self.image_size), device=self.device
+        ) * 2 - 1
+        
+        # Sample old images from buffer
+        old_imgs = torch.cat(random.choices(self.examples, k=batch_size - n_new), dim=0)
+        
+        inp_imgs = torch.cat([new_rand_imgs, old_imgs], dim=0)
+        
+        # Run Langevin dynamics
+        new_imgs = generate_fn(self.model, inp_imgs, steps, step_size, noise_std)
+        
+        # Update buffer
+        self.examples = list(torch.split(new_imgs, 1, dim=0)) + self.examples
+        self.examples = self.examples[:8192]  # Cap buffer size
+        
+        return new_imgs
+
+
+class EBM(nn.Module):
+    """
+    Energy-Based Model wrapper with training capabilities.
+    Uses Contrastive Divergence loss for training.
+    
+    Args:
+        model: EnergyModel neural network
+        alpha: Regularization coefficient
+        steps: Number of Langevin sampling steps
+        step_size: Langevin step size
+        noise: Noise level for sampling
+        device: Device to run on
+        image_size: Size of images
+        num_channels: Number of image channels (1 for grayscale, 3 for RGB)
+    """
+    def __init__(self, model, alpha=0.1, steps=60, step_size=10, noise=0.005, 
+                 device='cpu', image_size=32, num_channels=1):
+        super().__init__()
+        self.device = device
+        self.model = model
+        self.alpha = alpha
+        self.steps = steps
+        self.step_size = step_size
+        self.noise = noise
+        self.image_size = image_size
+        self.num_channels = num_channels
+        self.buffer = None  # Will be initialized when training starts
+        
+    def _init_buffer(self):
+        """Initialize the sample buffer."""
+        if self.buffer is None:
+            self.buffer = EBMBuffer(
+                self.model, self.device, buffer_size=128, 
+                image_size=self.image_size, num_channels=self.num_channels
+            )
+    
+    def _generate_samples_langevin(self, nn_energy_model, inp_imgs, steps, step_size, noise_std):
+        """Generate samples using Langevin dynamics."""
+        nn_energy_model.eval()
+        
+        for _ in range(steps):
+            with torch.no_grad():
+                noise = torch.randn_like(inp_imgs) * noise_std
+                inp_imgs = (inp_imgs + noise).clamp(-1.0, 1.0)
+            
+            inp_imgs.requires_grad_(True)
+            
+            # Compute energy and gradients
+            energy = nn_energy_model(inp_imgs)
+            grads, = torch.autograd.grad(
+                energy, inp_imgs, grad_outputs=torch.ones_like(energy)
+            )
+            
+            # Apply gradient descent with clipping
+            with torch.no_grad():
+                grads = grads.clamp(-0.03, 0.03)
+                inp_imgs = (inp_imgs - step_size * grads).clamp(-1.0, 1.0)
+        
+        return inp_imgs.detach()
+    
+    def generate(self, num_samples, steps=None, step_size=None, noise_std=None):
+        """Generate new images from random noise."""
+        if steps is None:
+            steps = self.steps * 4  # More steps for generation
+        if step_size is None:
+            step_size = self.step_size
+        if noise_std is None:
+            noise_std = self.noise
+        
+        self.model.eval()
+        x = torch.rand(
+            (num_samples, self.num_channels, self.image_size, self.image_size), 
+            device=self.device
+        ) * 2 - 1
+        
+        # Note: Do NOT use torch.no_grad() here - Langevin dynamics requires gradients
+        samples = self._generate_samples_langevin(
+            self.model, x, steps, step_size, noise_std
+        )
+        
+        # Scale from [-1, 1] to [0, 1]
+        return torch.clamp((samples + 1) / 2, 0, 1)
+    
+    def train_step(self, real_imgs, optimizer):
+        """Single training step using Contrastive Divergence."""
+        self._init_buffer()
+        self.model.train()
+        
+        # Add noise to real images
+        real_imgs = real_imgs + torch.randn_like(real_imgs) * self.noise
+        real_imgs = torch.clamp(real_imgs, -1.0, 1.0)
+        
+        # Sample fake images from buffer using Langevin dynamics
+        fake_imgs = self.buffer.sample_new_examples(
+            batch_size=real_imgs.size(0),
+            generate_fn=self._generate_samples_langevin,
+            steps=self.steps,
+            step_size=self.step_size,
+            noise_std=self.noise
+        )
+        
+        # Combine and compute energy
+        inp_imgs = torch.cat([real_imgs, fake_imgs], dim=0)
+        inp_imgs = inp_imgs.clone().detach().to(self.device).requires_grad_(False)
+        
+        out_scores = self.model(inp_imgs)
+        real_out, fake_out = torch.split(
+            out_scores, [real_imgs.size(0), fake_imgs.size(0)], dim=0
+        )
+        
+        # Contrastive Divergence loss: minimize energy on real, maximize on fake
+        cdiv_loss = real_out.mean() - fake_out.mean()
+        reg_loss = self.alpha * (real_out.pow(2).mean() + fake_out.pow(2).mean())
+        loss = cdiv_loss + reg_loss
+        
+        optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.1)
+        optimizer.step()
+        
+        return {
+            'loss': loss.item(),
+            'cdiv_loss': cdiv_loss.item(),
+            'reg_loss': reg_loss.item(),
+            'real_energy': real_out.mean().item(),
+            'fake_energy': fake_out.mean().item()
+        }
+    
+    def test_step(self, real_imgs):
+        """Validation step."""
+        self.model.eval()
+        batch_size = real_imgs.shape[0]
+        fake_imgs = torch.rand(
+            (batch_size, self.num_channels, self.image_size, self.image_size), 
+            device=self.device
+        ) * 2 - 1
+        
+        inp_imgs = torch.cat([real_imgs, fake_imgs], dim=0)
+        
+        with torch.no_grad():
+            out_scores = self.model(inp_imgs)
+            real_out, fake_out = torch.split(out_scores, batch_size, dim=0)
+            cdiv = real_out.mean() - fake_out.mean()
+        
+        return {
+            'cdiv_loss': cdiv.item(),
+            'real_energy': real_out.mean().item(),
+            'fake_energy': fake_out.mean().item()
+        }
+
+
 def get_model(model_name, **kwargs):
     """
     Define and return the appropriate model based on model_name.
     
     Args:
         model_name (str): One of 'FCNN', 'CNN', 'EnhancedCNN', 'ResNet18', 'AssignmentCNN', 
-                         'VAE', 'GAN', or 'MNISTGAN'.
+                         'VAE', 'GAN', 'MNISTGAN', 'Diffusion', or 'EBM'.
         **kwargs: Additional arguments for specific models:
             - latent_dim (int): For VAE, dimension of latent space. Default is 2.
             - z_dim (int): For GAN/MNISTGAN, dimension of latent space. Default is 100.
+            - image_size (int): For Diffusion/EBM, size of input images. Default is 64/32.
+            - num_channels (int): For Diffusion/EBM, number of image channels. Default is 3/1.
+            - embedding_dim (int): For Diffusion, noise embedding dimension. Default is 32.
+            - schedule_fn: For Diffusion, diffusion schedule function. Default is offset_cosine.
+            - alpha (float): For EBM, regularization coefficient. Default is 0.1.
+            - steps (int): For EBM, Langevin sampling steps. Default is 60.
+            - step_size (float): For EBM, Langevin step size. Default is 10.
+            - noise (float): For EBM, noise level. Default is 0.005.
+            - device (str): For EBM, device to run on. Default is 'cpu'.
     
     Returns:
         nn.Module: The requested neural network model.
@@ -549,8 +1120,29 @@ def get_model(model_name, **kwargs):
         # MNIST GAN for handwritten digit generation (Assignment 3)
         z_dim = kwargs.get('z_dim', 100)
         model = MNISTGAN(z_dim=z_dim)
+    elif model_name == 'DIFFUSION':
+        # Diffusion Model for image generation (Module 8)
+        image_size = kwargs.get('image_size', 64)
+        num_channels = kwargs.get('num_channels', 3)
+        embedding_dim = kwargs.get('embedding_dim', 32)
+        schedule_fn = kwargs.get('schedule_fn', offset_cosine_diffusion_schedule)
+        unet = UNet(image_size, num_channels, embedding_dim)
+        model = DiffusionModel(unet, schedule_fn)
+    elif model_name == 'EBM' or model_name == 'ENERGYMODEL':
+        # Energy-Based Model for image generation (Module 8)
+        device = kwargs.get('device', 'cpu')
+        alpha = kwargs.get('alpha', 0.1)
+        steps = kwargs.get('steps', 60)
+        step_size = kwargs.get('step_size', 10)
+        noise = kwargs.get('noise', 0.005)
+        image_size = kwargs.get('image_size', 32)
+        num_channels = kwargs.get('num_channels', 1)  # 1 for grayscale, 3 for RGB
+        energy_model = EnergyModel(num_channels=num_channels, image_size=image_size)
+        model = EBM(energy_model, alpha=alpha, steps=steps, step_size=step_size, 
+                    noise=noise, device=device, image_size=image_size, 
+                    num_channels=num_channels)
     else:
-        raise ValueError(f"Unknown model name: {model_name}. Choose from 'FCNN', 'CNN', 'EnhancedCNN', 'ResNet18', 'AssignmentCNN', 'VAE', 'GAN', or 'MNISTGAN'.")
+        raise ValueError(f"Unknown model name: {model_name}. Choose from 'FCNN', 'CNN', 'EnhancedCNN', 'ResNet18', 'AssignmentCNN', 'VAE', 'GAN', 'MNISTGAN', 'Diffusion', or 'EBM'.")
     
     return model
 

@@ -20,6 +20,8 @@ RUN uv pip install pip && uv run python -m spacy download en_core_web_lg
 COPY ./app /code/app
 # Copy the helper library for VAE and GAN models
 COPY ./helper_lib /code/helper_lib
+# Copy trained model weights (CNN, GAN, RNN, Diffusion, EBM)
+COPY ./models /code/models
 
 # Command to run the application on internal port 80
 # CMD ["uv", "run", "fastapi", "run", "app/main.py", "--port", "80"]

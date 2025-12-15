@@ -6,12 +6,15 @@ from app.bigram_model import BigramModel
 from app.embedding_model import EmbeddingModel
 from app.classifier_model import ImageClassifier
 from app.gan_model import MNISTGANGenerator
+from app.rnn_model import RNNTextGenerator
+from app.diffusion_model import DiffusionImageGenerator
+from app.ebm_model import EBMImageGenerator
 import base64
 
 app = FastAPI(
     title="Hello World GenAI API",
-    description="FastAPI application with Bigram Text Generation, Word Embeddings, Image Classification, and MNIST GAN",
-    version="0.3.0"
+    description="FastAPI application with Bigram/RNN Text Generation, Word Embeddings, Image Classification, MNIST GAN, Diffusion, and EBM (MNIST + CIFAR-10)",
+    version="0.4.1"  # HW4 - Added Diffusion and EBM image generators with CIFAR-10 support
 )
 
 # Sample corpus for the bigram model
@@ -34,6 +37,32 @@ classifier = ImageClassifier(model_path="models/assignment_cnn.pth")
 # Initialize MNIST GAN generator (Assignment 3 - GAN for handwritten digits)
 # Model path can be set to load trained generator weights
 gan_generator = MNISTGANGenerator(model_path="models/mnist_gan_generator.pth", z_dim=100)
+
+# Initialize RNN (LSTM) text generator (Module 7 - RNN for text generation)
+# Try to load pre-trained model, otherwise train and save
+rnn_generator = RNNTextGenerator(vocab_size=10000, embedding_dim=100, hidden_dim=128, seq_len=30)
+if not rnn_generator.load_model("models/rnn_model.pth"):
+    print("No pre-trained RNN model found. Training from scratch...")
+    print("Training RNN model on Count of Monte Cristo text...")
+    rnn_generator.train(epochs=15, batch_size=64)
+    rnn_generator.save_model("models/rnn_model.pth")
+    print("RNN model training complete and saved!")
+
+# Initialize Diffusion image generator (HW4 - Diffusion model for image generation)
+# Model path can be set to load trained weights
+diffusion_generator = DiffusionImageGenerator(
+    image_size=64, 
+    num_channels=3,
+    model_path="models/diffusion_checkpoints/diffusion_best.pth"
+)
+
+# Initialize EBM image generator for CIFAR-10 (HW4 - Energy-Based Model for RGB image generation)
+# Model path can be set to load trained weights
+ebm_generator = EBMImageGenerator(
+    image_size=32,
+    num_channels=3,  # RGB for CIFAR-10
+    model_path="models/ebm_cifar10_best.pth"
+)
 
 
 # ============== Request Models ==============
@@ -63,6 +92,24 @@ class GANGenerateRequest(BaseModel):
     num_samples: int = 1
 
 
+class RNNTextGenerationRequest(BaseModel):
+    start_word: str
+    length: int = 50
+    temperature: float = 1.0
+
+
+class DiffusionGenerateRequest(BaseModel):
+    num_samples: int = 1
+    diffusion_steps: int = 100
+
+
+class EBMGenerateRequest(BaseModel):
+    num_samples: int = 1
+    steps: int = 256
+    step_size: float = 10.0
+    noise_std: float = 0.01
+
+
 # ============== Endpoints ==============
 
 @app.get("/")
@@ -81,6 +128,29 @@ def generate_text(request: TextGenerationRequest):
     """
     generated_text = bigram_model.generate_text(request.start_word, request.length)
     return {"generated_text": generated_text}
+
+
+@app.post("/generate_with_rnn")
+def generate_with_rnn(request: RNNTextGenerationRequest):
+    """
+    Generate text using LSTM (RNN) language model.
+    
+    The model is trained on Count of Monte Cristo text and uses LSTM
+    architecture for more coherent text generation compared to bigram model.
+    
+    - **start_word**: The word or phrase to start generation from
+    - **length**: Number of words to generate (default: 50)
+    - **temperature**: Sampling temperature (default: 1.0, higher = more random)
+    """
+    try:
+        generated_text = rnn_generator.generate_text(
+            seed_text=request.start_word,
+            length=request.length,
+            temperature=request.temperature
+        )
+        return {"generated_text": generated_text}
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/embedding")
@@ -295,3 +365,184 @@ def get_gan_info():
         "output_shape": "(1, 28, 28)",
         "training_dataset": "MNIST"
     }
+
+
+# ============== Diffusion Model Endpoints (HW4) ==============
+
+@app.post("/diffusion/generate")
+def generate_diffusion_images(request: DiffusionGenerateRequest):
+    """
+    Generate images using the trained Diffusion model.
+    
+    - **num_samples**: Number of images to generate (1-16)
+    - **diffusion_steps**: Number of diffusion steps (more = better quality, slower)
+    - Returns base64-encoded PNG images
+    """
+    # Validate num_samples
+    if request.num_samples < 1 or request.num_samples > 16:
+        raise HTTPException(
+            status_code=400,
+            detail="num_samples must be between 1 and 16"
+        )
+    
+    try:
+        images_base64 = diffusion_generator.generate_base64(
+            request.num_samples, 
+            request.diffusion_steps
+        )
+        
+        return {
+            "num_samples": request.num_samples,
+            "diffusion_steps": request.diffusion_steps,
+            "images": images_base64
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating images: {str(e)}")
+
+
+@app.get("/diffusion/generate/grid")
+def generate_diffusion_grid(
+    num_samples: int = Query(default=9, ge=1, le=16, description="Number of images to generate"),
+    nrow: int = Query(default=3, ge=1, le=4, description="Number of images per row"),
+    diffusion_steps: int = Query(default=100, ge=10, le=1000, description="Number of diffusion steps")
+):
+    """
+    Generate a grid of images using the Diffusion model.
+    
+    - **num_samples**: Number of images to generate (1-16)
+    - **nrow**: Number of images per row in the grid (1-4)
+    - **diffusion_steps**: Number of diffusion steps
+    - Returns a single base64-encoded PNG image of the grid
+    """
+    try:
+        grid_base64 = diffusion_generator.generate_grid(num_samples, nrow, diffusion_steps)
+        
+        return {
+            "num_samples": num_samples,
+            "nrow": nrow,
+            "diffusion_steps": diffusion_steps,
+            "grid_image": grid_base64
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating grid: {str(e)}")
+
+
+@app.get("/diffusion/generate/image")
+def generate_single_diffusion_image(
+    diffusion_steps: int = Query(default=100, ge=10, le=1000, description="Number of diffusion steps")
+):
+    """
+    Generate a single image using the Diffusion model and return as PNG.
+    
+    Returns a PNG image directly (can be viewed in browser).
+    """
+    try:
+        images_base64 = diffusion_generator.generate_base64(1, diffusion_steps)
+        image_bytes = base64.b64decode(images_base64[0])
+        return Response(content=image_bytes, media_type="image/png")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating image: {str(e)}")
+
+
+@app.get("/diffusion/info")
+def get_diffusion_info():
+    """
+    Get information about the Diffusion model.
+    """
+    return diffusion_generator.get_info()
+
+
+# ============== Energy-Based Model (EBM) Endpoints - CIFAR-10 (HW4) ==============
+
+@app.post("/ebm/generate")
+def generate_ebm_images(request: EBMGenerateRequest):
+    """
+    Generate RGB images using the CIFAR-10 trained Energy-Based Model (EBM).
+    
+    Uses Langevin dynamics to sample low-energy states.
+    Generates 32x32 RGB images.
+    
+    - **num_samples**: Number of images to generate (1-16)
+    - **steps**: Number of Langevin sampling steps (more = better quality)
+    - **step_size**: Langevin step size
+    - **noise_std**: Noise standard deviation for sampling
+    - Returns base64-encoded PNG images
+    """
+    # Validate num_samples
+    if request.num_samples < 1 or request.num_samples > 16:
+        raise HTTPException(
+            status_code=400,
+            detail="num_samples must be between 1 and 16"
+        )
+    
+    try:
+        images_base64 = ebm_generator.generate_base64(
+            request.num_samples,
+            request.steps,
+            request.step_size,
+            request.noise_std
+        )
+        
+        return {
+            "num_samples": request.num_samples,
+            "langevin_steps": request.steps,
+            "step_size": request.step_size,
+            "noise_std": request.noise_std,
+            "dataset": "CIFAR-10 (RGB)",
+            "images": images_base64
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating images: {str(e)}")
+
+
+@app.get("/ebm/generate/grid")
+def generate_ebm_grid(
+    num_samples: int = Query(default=9, ge=1, le=16, description="Number of images to generate"),
+    nrow: int = Query(default=3, ge=1, le=4, description="Number of images per row"),
+    steps: int = Query(default=256, ge=10, le=1000, description="Number of Langevin steps")
+):
+    """
+    Generate a grid of RGB images using the CIFAR-10 EBM.
+    
+    - **num_samples**: Number of images to generate (1-16)
+    - **nrow**: Number of images per row in the grid (1-4)
+    - **steps**: Number of Langevin sampling steps
+    - Returns a single base64-encoded PNG image of the grid
+    """
+    try:
+        grid_base64 = ebm_generator.generate_grid(num_samples, nrow, steps)
+        
+        return {
+            "num_samples": num_samples,
+            "nrow": nrow,
+            "langevin_steps": steps,
+            "dataset": "CIFAR-10 (RGB)",
+            "grid_image": grid_base64
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating grid: {str(e)}")
+
+
+@app.get("/ebm/generate/image")
+def generate_single_ebm_image(
+    steps: int = Query(default=256, ge=10, le=1000, description="Number of Langevin steps")
+):
+    """
+    Generate a single RGB image using the CIFAR-10 EBM and return as PNG.
+    
+    Returns a PNG image directly (can be viewed in browser).
+    """
+    try:
+        images_base64 = ebm_generator.generate_base64(1, steps)
+        image_bytes = base64.b64decode(images_base64[0])
+        return Response(content=image_bytes, media_type="image/png")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating image: {str(e)}")
+
+
+@app.get("/ebm/info")
+def get_ebm_info():
+    """
+    Get information about the CIFAR-10 Energy-Based Model (EBM).
+    """
+    return ebm_generator.get_info()

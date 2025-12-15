@@ -1,8 +1,8 @@
-# Assignment 3: Image Generation - Generative Adversarial Networks
+# Assignment 4: Advanced Image Generation
 
 APAN 5560 Applied Generative AI
 
-This repository contains the FastAPI application with MNIST GAN for generating handwritten digits, built as part of Assignment 3
+This repository contains a FastAPI application with multiple generative AI models including Diffusion Models and Energy-Based Models (EBMs) for image generation on CIFAR-10 dataset, built as part of Assignment 4.
 
 ---
 
@@ -17,7 +17,11 @@ This repository contains the FastAPI application with MNIST GAN for generating h
 cd hello_world_genai
 
 # (Optional) Recreate venv if has env path conflict
-rm -rf .venv && uv venv && uv sync
+rm -rf .venv && uv venv
+
+# update and install dependencies
+uv sync
+uv pip install en-core-web-lg@https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl
 
 # Run the API
 uv run fastapi dev app/main.py
@@ -43,7 +47,7 @@ docker run -p 8000:8000 hello_world_genai
 hello_world_genai/
 │
 ├── README.md                           # This file
-├── pyproject.toml                      # Dependencies (v0.3.0)
+├── pyproject.toml                      # Dependencies (v0.4.1)
 ├── uv.lock                             # Dependency lock file
 ├── Dockerfile                          # Docker configuration
 ├── .gitignore                          # Git ignore rules
@@ -53,65 +57,116 @@ hello_world_genai/
 │   ├── __init__.py
 │   ├── main.py                         # FastAPI endpoints (all features)
 │   ├── bigram_model.py                 # Bigram text generation
+│   ├── rnn_model.py                    # RNN (LSTM) text generation
 │   ├── embedding_model.py              # Word embeddings
 │   ├── classifier_model.py             # CIFAR-10 image classifier
-│   └── gan_model.py                    # MNIST GAN generator (Assignment 3)
+│   ├── gan_model.py                    # MNIST GAN generator (Assignment 3)
+│   ├── diffusion_model.py              # Diffusion image generator (Assignment 4)
+│   └── ebm_model.py                    # Energy-Based Model generator (Assignment 4)
 │
 ├── helper_lib/                         # Reusable Neural Network Helper Library
 │   ├── __init__.py                     # Package initialization
 │   ├── data_loader.py                  # get_data_loader(), get_mnist_data_loader()
-│   ├── model.py                        # get_model() - MLP, CNN, VAE, GAN, MNISTGAN
-│   ├── trainer.py                      # train_model(), train_mnist_gan()
+│   ├── model.py                        # get_model() - CNN, VAE, GAN, Diffusion, EBM
+│   ├── trainer.py                      # train_model(), train_diffusion(), train_ebm()
 │   ├── evaluator.py                    # evaluate_model()
-│   ├── generator.py                    # generate_samples(), generate_mnist_gan_samples()
+│   ├── generator.py                    # generate_diffusion_samples(), generate_ebm_samples()
 │   └── utils.py                        # save_model(), load_model()
 │
-├── scripts/                            # Training scripts
+├── scripts/                            # Training & test scripts
 │   ├── practice1_cnn.py                # CNN training script (Assignment 2)
-│   └── train_mnist_gan.py              # MNIST GAN training script (Assignment 3)
+│   ├── train_mnist_gan.py              # MNIST GAN training script (Assignment 3)
+│   ├── train_diffusion_cifar10.py      # Diffusion model training (Assignment 4)
+│   ├── train_ebm_cifar10.py            # EBM training script (Assignment 4)
+│   └── test_ebm_generate.py            # Quick test for EBM generation
 │
 ├── models/                             # Trained model weights
 │   ├── assignment_cnn.pth              # Trained CNN model
-│   ├── mnist_gan.pth                   # Full MNIST GAN model (Assignment 3)
-│   └── mnist_gan_generator.pth         # MNIST GAN generator only (Assignment 3)
+│   ├── mnist_gan.pth                   # Full MNIST GAN model
+│   ├── mnist_gan_generator.pth         # MNIST GAN generator only
+│   ├── diffusion_checkpoints/          # Diffusion training checkpoints
+│   │   └── diffusion_best.pth          # Best Diffusion model (Assignment 4)
+│   ├── ebm_cifar10_checkpoints/        # EBM training checkpoints
+│   └── ebm_cifar10_best.pth            # EBM for CIFAR-10 (Assignment 4)
 │
-└── data/                               # Dataset storage
-    ├── MNIST/                          # MNIST dataset (auto-downloaded for Assignment 3)
-    └── cifar-10-batches-py/            # CIFAR-10 dataset
+└── data/                               # Dataset storage (gitignored)
+    ├── .gitkeep                        # Keep directory in git
+    ├── MNIST/                          # MNIST dataset (auto-downloaded)
+    └── cifar-10-batches-py/            # CIFAR-10 dataset (auto-downloaded)
 ```
 
 ---
 
-## Assignment 3: Image Generation using GAN Architecture
+## Assignment 4: Diffusion & Energy-Based Models
 
-Implements a GAN matching the assignment specification for MNIST digit generation:
+### Part 1: Diffusion Model (trained by CIFAR-10 dataset)
 
-### Generator Architecture
-- **Input:** Noise vector of shape (BATCH_SIZE, 100)
-- **FC Layer:** 100 → 7×7×128, then reshape to (128, 7, 7)
-- **ConvTranspose2D:** 128 → 64, kernel 4, stride 2, padding 1 + BatchNorm + ReLU → 14×14
-- **ConvTranspose2D:** 64 → 1, kernel 4, stride 2, padding 1 + Tanh → 28×28
-- **Output:** 28×28 grayscale image
+A UNet-based Diffusion Model that learns to generate images by reversing a noise diffusion process.
 
-### Discriminator Architecture
-- **Input:** Image of shape (1, 28, 28)
-- **Conv2D:** 1 → 64, kernel 4, stride 2, padding 1 + LeakyReLU(0.2) → 14×14
-- **Conv2D:** 64 → 128, kernel 4, stride 2, padding 1 + BatchNorm + LeakyReLU(0.2) → 7×7
-- **Flatten + Linear:** 6272 → 1
-- **Output:** Real/Fake probability
+#### Architecture
+- **Input:** 64×64 RGB images (resized from CIFAR-10 32×32)
+- **UNet Backbone:**
+  - Encoder: DownBlocks with residual connections
+  - Bottleneck: ResidualBlocks
+  - Decoder: UpBlocks with skip connections
+- **Sinusoidal Embedding:** Encodes noise variance at each timestep
+- **Diffusion Schedule:** Offset Cosine schedule for better sample quality
+- **EMA:** Exponential Moving Average for stable sampling
+
+#### Key Components
+```
+DiffusionModel
+├── UNet (neural network backbone)
+│   ├── SinusoidalEmbedding
+│   ├── DownBlocks (encoder)
+│   ├── ResidualBlocks (bottleneck)
+│   └── UpBlocks (decoder)
+├── Diffusion Schedule (noise/signal rates)
+├── EMA UNet (for inference)
+└── Normalizer (input normalization)
+```
+
+### Part 2: Energy-Based Model (trained by CIFAR-10 dataset)
+
+An Energy-Based Model that learns an energy function mapping images to scalar values, using Langevin dynamics for sampling.
+
+#### Architecture
+- **Input:** 32×32 RGB images (CIFAR-10)
+- **CNN Energy Function:**
+  - Conv2d: in_channels → 16, k=5, s=2, p=2 + Swish
+  - Conv2d: 16 → 32, k=3, s=2, p=1 + Swish
+  - Conv2d: 32 → 64, k=3, s=2, p=1 + Swish
+  - Conv2d: 64 → 64, k=3, s=2, p=1 + Swish
+  - Flatten + Linear: 256 → 64 → 1
+- **Output:** Scalar energy value
+
+#### Training Method
+- **Loss:** Contrastive Divergence (minimize real energy, maximize fake energy)
+- **Sampling:** Langevin Dynamics with gradient descent
+- **Buffer:** Sample buffer for efficient training
 
 ---
 
 ## API Endpoints
 
-### GAN Endpoints (Assignment 3)
+### Diffusion Model Endpoints (Assignment 4)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/gan/generate` | POST | Generate 1-64 handwritten digit images (base64) |
-| `/gan/generate/grid` | GET | Generate a grid of digit images |
-| `/gan/generate/image` | GET | Generate single digit image (PNG) |
-| `/gan/info` | GET | Get GAN model architecture info |
+| `/diffusion/generate` | POST | Generate 1-16 images using diffusion model |
+| `/diffusion/generate/grid` | GET | Generate a grid of images |
+| `/diffusion/generate/image` | GET | Generate single image (PNG) |
+| `/diffusion/info` | GET | Get Diffusion model info |
+
+### EBM Endpoints - CIFAR-10 (Assignment 4)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/ebm/generate` | POST | Generate 1-16 RGB images using EBM |
+| `/ebm/generate/grid` | GET | Generate a grid of RGB images |
+| `/ebm/generate/image` | GET | Generate single RGB image (PNG) |
+| `/ebm/info` | GET | Get EBM model info |
+
 
 ### Other Endpoints
 
@@ -119,43 +174,66 @@ Implements a GAN matching the assignment specification for MNIST digit generatio
 |----------|--------|-------------|
 | `/` | GET | Welcome message |
 | `/generate` | POST | Generate text using bigram model |
+| `/generate_with_rnn` | POST | Generate text using RNN (LSTM) |
 | `/embedding` | POST | Get word embedding vector |
 | `/similarity` | POST | Calculate text similarity |
 | `/classify` | POST | Classify image (CIFAR-10) |
 | `/classify/classes` | GET | Get CIFAR-10 class names |
+| `/gan/generate` | POST | Generate 1-64 handwritten digit images |
+| `/gan/generate/grid` | GET | Generate a grid of digit images |
+| `/gan/generate/image` | GET | Generate single digit image (PNG) |
+| `/gan/info` | GET | Get GAN model architecture info |
+
 
 ---
 
-## Model Training (Optional)
+## Model Training workflow for reference
 
-> **Note:** If `models/mnist_gan_generator.pth` already exists, you can skip training and run the API directly.
-
-### Train MNIST GAN
+### Train Diffusion Model (CIFAR-10)
 
 ```bash
 cd hello_world_genai
-uv run python scripts/train_mnist_gan.py
+source .venv/bin/activate  # or: uv run python ...
+python scripts/train_diffusion_cifar10.py
 ```
 
-This will:
-- Download MNIST dataset (if not exists)
-- Train the MNISTGAN model for 20 epochs
-- Save models to:
-  - `./models/mnist_gan.pth` (full model)
-  - `./models/mnist_gan_generator.pth` (generator only for API)
+**Configuration:**
+- Image size: 64×64 (resized from 32×32)
+- Batch size: 64
+- Epochs: 50
+- Learning rate: 1e-4
+- Loss: L1 (MAE)
 
-**Expected output:**
+**Output:** `models/diffusion_best.pth`
+
+### Train EBM (CIFAR-10)
+
+```bash
+cd hello_world_genai
+source .venv/bin/activate
+python scripts/train_ebm_cifar10.py
 ```
-============================================================
-Assignment 3: MNIST GAN Training
-============================================================
-[Epoch 1/20] [Batch 0/469] [D loss: 1.3863] [G loss: 0.6931]
-...
-Training Complete!
-Model saved to: ./models/mnist_gan.pth
-Generator saved to: ./models/mnist_gan_generator.pth
-============================================================
-```
+
+**Configuration:**
+- Image size: 32×32 RGB
+- Batch size: 64
+- Epochs: 30
+- Learning rate: 1e-4
+- Langevin steps: 60
+- Step size: 10.0
+
+**Output:** `models/ebm_cifar10_best.pth`
+
+### Training Notes
+
+⚠️ **Training Time:**
+- Diffusion Model: ~1-2 hours on GPU, ~4-6 hours on CPU
+- EBM: ~2-4 hours on GPU (Langevin sampling is slow)
+
+💡 **Tips:**
+- Use GPU (CUDA/MPS) for faster training
+- Monitor loss curves for convergence
+- Adjust epochs based on available time
 
 ---
 
@@ -164,49 +242,69 @@ Generator saved to: ./models/mnist_gan_generator.pth
 ### Using Swagger UI
 
 1. Visit http://127.0.0.1:8000/docs
-2. Navigate to **GAN** section
-3. Try these endpoints:
+2. Navigate to the desired section (Diffusion, EBM, GAN)
+3. Try the endpoints
 
-#### Generate Single Image (PNG)
-- Expand `GET /gan/generate/image`
-- Click "Try it out" → "Execute"
-- The generated digit image will display directly
-
-#### Generate Image Grid
-- Expand `GET /gan/generate/grid`
-- Set `num_samples=16`, `nrow=4`
+#### Generate Diffusion Image
+- Expand `GET /diffusion/generate/image`
+- Set `diffusion_steps=100` (more = better quality)
 - Click "Execute"
-- Response contains base64-encoded grid image
 
-#### Generate Multiple Images
-- Expand `POST /gan/generate`
-- Set request body: `{"num_samples": 10}`
+#### Generate EBM Image Grid (CIFAR-10)
+- Expand `GET /ebm/generate/grid`
+- Set `num_samples=9`, `nrow=3`, `steps=256`
 - Click "Execute"
-- Response contains list of base64-encoded images
 
 ### Using curl
 
 ```bash
-# Generate single image (saves as PNG)
-curl http://127.0.0.1:8000/gan/generate/image --output generated_digit.png
+# Generate single Diffusion image
+curl "http://127.0.0.1:8000/diffusion/generate/image?diffusion_steps=100" --output diffusion.png
 
-# Generate grid (returns JSON with base64)
-curl "http://127.0.0.1:8000/gan/generate/grid?num_samples=16&nrow=4"
+# Generate EBM CIFAR-10 image
+curl "http://127.0.0.1:8000/ebm/generate/image?steps=256" --output ebm_cifar10.png
 
-# Get GAN model info
-curl http://127.0.0.1:8000/gan/info
+# Get Diffusion model info
+curl http://127.0.0.1:8000/diffusion/info
+
+# Get EBM model info
+curl http://127.0.0.1:8000/ebm/info
 ```
 
-**Response Example (POST /gan/generate):**
-```json
-{
-  "num_samples": 1,
-  "latent_dim": 100,
-  "images": ["iVBORw0KGgoAAAANSUhEUgAAABwAAAAcCAAAAAB..."]
-}
-```
 
 ---
+
+## Troubleshooting for common issue when running FastAPI
+
+### Issue: `No module named 'torch'` when running FastAPI
+
+**Cause:** The `.venv` may have hardcoded path that mismatch to your local machine
+
+**Solution:** Recreate the virtual environment:
+```bash
+cd hello_world_genai
+rm -rf .venv
+uv sync
+uv pip install en-core-web-lg@https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl
+uv run fastapi dev app/main.py
+```
+
+### Issue: `Can't find model 'en_core_web_lg'`
+
+**Solution:** Install spaCy model:
+```bash
+uv pip install en-core-web-lg@https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl
+```
+
+### Issue: `Address already in use` on port 8000
+
+**Solution:** Use different port or kill processes:
+```bash
+uv run fastapi dev app/main.py --port 8001
+
+
+---
+
 
 ## Requirements
 
@@ -217,3 +315,6 @@ curl http://127.0.0.1:8000/gan/info
 - FastAPI
 - matplotlib >= 3.7.0
 - Pillow
+- tqdm
+
+---

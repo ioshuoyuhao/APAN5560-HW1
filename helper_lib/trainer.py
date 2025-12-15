@@ -319,3 +319,245 @@ def train_mnist_gan(model, data_loader, device='cpu', epochs=10, lr=0.0002, beta
     print("Finished Training MNIST GAN")
     return model
 
+
+def train_diffusion(model, data_loader, criterion, optimizer, device='cpu', epochs=10,
+                    val_loader=None, checkpoint_dir=None):
+    """
+    Run several iterations of the diffusion model training loop and return the trained model.
+    
+    Args:
+        model (nn.Module): The DiffusionModel to train.
+        data_loader (DataLoader): DataLoader for training data.
+        criterion: Loss function (e.g., nn.L1Loss() or nn.MSELoss()).
+        optimizer: Optimizer (e.g., optim.AdamW()).
+        device (str): Device to train on ('cpu', 'cuda', or 'mps'). Default is 'cpu'.
+        epochs (int): Number of training epochs. Default is 10.
+        val_loader (DataLoader): Optional DataLoader for validation data.
+        checkpoint_dir (str): Optional directory to save checkpoints.
+    
+    Returns:
+        nn.Module: The trained DiffusionModel.
+    """
+    import os
+    from tqdm import tqdm
+    
+    # Create checkpoint directory if specified
+    if checkpoint_dir:
+        os.makedirs(checkpoint_dir, exist_ok=True)
+    
+    model.to(device)
+    best_val_loss = float('inf')
+    
+    for epoch in range(epochs):
+        model.train()
+        train_losses = []
+        
+        # Training loop with progress bar
+        loader_with_progress = tqdm(data_loader, ncols=120, desc=f'Epoch {epoch+1}/{epochs} [Train]')
+        for images, _ in loader_with_progress:
+            images = images.to(device)
+            loss = model.train_step(images, optimizer, criterion)
+            train_losses.append(loss)
+            loader_with_progress.set_postfix(loss=f'{loss:.4f}')
+        
+        avg_train_loss = sum(train_losses) / len(train_losses)
+        
+        # Validation loop if val_loader is provided
+        avg_val_loss = None
+        if val_loader:
+            model.eval()
+            val_losses = []
+            for images, _ in tqdm(val_loader, desc=f"Epoch {epoch+1} [Val]"):
+                images = images.to(device)
+                loss = model.test_step(images, criterion)
+                val_losses.append(loss)
+            avg_val_loss = sum(val_losses) / len(val_losses)
+        
+        # Print epoch summary
+        if avg_val_loss is not None:
+            print(f"Epoch {epoch+1}/{epochs} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
+        else:
+            print(f"Epoch {epoch+1}/{epochs} | Train Loss: {avg_train_loss:.4f}")
+        
+        # Save checkpoint if checkpoint_dir is specified
+        if checkpoint_dir:
+            checkpoint = {
+                'epoch': epoch + 1,
+                'model_state_dict': model.network.state_dict(),
+                'ema_model_state_dict': model.ema_network.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'train_loss': avg_train_loss,
+                'val_loss': avg_val_loss,
+                'normalizer_mean': model.normalizer_mean,
+                'normalizer_std': model.normalizer_std
+            }
+            
+            # Save latest checkpoint
+            checkpoint_path = os.path.join(checkpoint_dir, f'diffusion_epoch_{epoch+1:03d}.pth')
+            torch.save(checkpoint, checkpoint_path)
+            
+            # Save best model based on validation loss
+            if avg_val_loss is not None and avg_val_loss < best_val_loss:
+                best_val_loss = avg_val_loss
+                best_checkpoint_path = os.path.join(checkpoint_dir, 'diffusion_best.pth')
+                torch.save(checkpoint, best_checkpoint_path)
+                print(f"New best model saved at epoch {epoch+1} with val_loss: {avg_val_loss:.4f}")
+            
+            print(f"Checkpoint saved: {checkpoint_path}")
+    
+    print("Finished Training Diffusion Model")
+    return model
+
+
+def load_diffusion_checkpoint(model, optimizer, checkpoint_path, device='cpu'):
+    """
+    Load a saved diffusion model checkpoint and restore model, EMA, and optimizer states.
+    
+    Args:
+        model: DiffusionModel instance
+        optimizer: Optimizer instance
+        checkpoint_path: Path to checkpoint file
+        device: Device to load to
+    
+    Returns:
+        int: Epoch number from checkpoint
+    """
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    
+    model.network.load_state_dict(checkpoint['model_state_dict'])
+    model.ema_network.load_state_dict(checkpoint['ema_model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    
+    # Restore normalizer settings
+    model.normalizer_mean = checkpoint['normalizer_mean']
+    model.normalizer_std = checkpoint['normalizer_std']
+    
+    print(f"Loaded checkpoint from epoch {checkpoint['epoch']}")
+    print(f"Train Loss: {checkpoint['train_loss']:.4f}, Val Loss: {checkpoint['val_loss']}")
+    
+    return checkpoint['epoch']
+
+
+def train_ebm(model, data_loader, optimizer, device='cpu', epochs=10, 
+              val_loader=None, checkpoint_dir=None):
+    """
+    Run several iterations of the EBM training loop and return the trained model.
+    
+    Args:
+        model (nn.Module): The EBM model to train.
+        data_loader (DataLoader): DataLoader for training data.
+        optimizer: Optimizer (e.g., optim.Adam()).
+        device (str): Device to train on ('cpu', 'cuda', or 'mps'). Default is 'cpu'.
+        epochs (int): Number of training epochs. Default is 10.
+        val_loader (DataLoader): Optional DataLoader for validation data.
+        checkpoint_dir (str): Optional directory to save checkpoints.
+    
+    Returns:
+        nn.Module: The trained EBM model.
+    """
+    import os
+    from tqdm import tqdm
+    
+    # Create checkpoint directory if specified
+    if checkpoint_dir:
+        os.makedirs(checkpoint_dir, exist_ok=True)
+    
+    model.to(device)
+    model.device = device
+    
+    for epoch in range(epochs):
+        model.model.train()
+        train_losses = []
+        train_metrics = {'loss': 0, 'cdiv_loss': 0, 'reg_loss': 0, 
+                        'real_energy': 0, 'fake_energy': 0}
+        batch_count = 0
+        
+        # Training loop with progress bar
+        loader_with_progress = tqdm(data_loader, ncols=120, desc=f'Epoch {epoch+1}/{epochs} [Train]')
+        for images, _ in loader_with_progress:
+            images = images.to(device)
+            metrics = model.train_step(images, optimizer)
+            
+            for k, v in metrics.items():
+                train_metrics[k] += v
+            batch_count += 1
+            
+            loader_with_progress.set_postfix(loss=f'{metrics["loss"]:.4f}')
+        
+        # Average training metrics
+        for k in train_metrics:
+            train_metrics[k] /= batch_count
+        
+        # Validation loop if val_loader is provided
+        val_metrics = None
+        if val_loader:
+            model.model.eval()
+            val_metrics = {'cdiv_loss': 0, 'real_energy': 0, 'fake_energy': 0}
+            val_batch_count = 0
+            for images, _ in tqdm(val_loader, desc=f"Epoch {epoch+1} [Val]"):
+                images = images.to(device)
+                metrics = model.test_step(images)
+                for k, v in metrics.items():
+                    val_metrics[k] += v
+                val_batch_count += 1
+            
+            for k in val_metrics:
+                val_metrics[k] /= val_batch_count
+        
+        # Print epoch summary
+        print(f"Epoch {epoch+1}/{epochs} | " + 
+              ", ".join(f"{k}: {v:.4f}" for k, v in train_metrics.items()))
+        if val_metrics:
+            print(f"Validation | " + 
+                  ", ".join(f"{k}: {v:.4f}" for k, v in val_metrics.items()))
+        
+        # Save checkpoint if checkpoint_dir is specified
+        if checkpoint_dir:
+            checkpoint = {
+                'epoch': epoch + 1,
+                'model_state_dict': model.model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'train_loss': train_metrics['loss'],
+                'alpha': model.alpha,
+                'steps': model.steps,
+                'step_size': model.step_size,
+                'noise': model.noise
+            }
+            
+            checkpoint_path = os.path.join(checkpoint_dir, f'ebm_epoch_{epoch+1:03d}.pth')
+            torch.save(checkpoint, checkpoint_path)
+            print(f"Checkpoint saved: {checkpoint_path}")
+    
+    print("Finished Training EBM")
+    return model
+
+
+def load_ebm_checkpoint(model, optimizer, checkpoint_path, device='cpu'):
+    """
+    Load a saved EBM checkpoint and restore model and optimizer states.
+    
+    Args:
+        model: EBM instance
+        optimizer: Optimizer instance
+        checkpoint_path: Path to checkpoint file
+        device: Device to load to
+    
+    Returns:
+        int: Epoch number from checkpoint
+    """
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    
+    model.model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    
+    # Restore hyperparameters
+    model.alpha = checkpoint.get('alpha', model.alpha)
+    model.steps = checkpoint.get('steps', model.steps)
+    model.step_size = checkpoint.get('step_size', model.step_size)
+    model.noise = checkpoint.get('noise', model.noise)
+    
+    print(f"Loaded EBM checkpoint from epoch {checkpoint['epoch']}")
+    print(f"Train Loss: {checkpoint['train_loss']:.4f}")
+    
+    return checkpoint['epoch']
+

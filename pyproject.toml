@@ -1,7 +1,7 @@
 [project]
 name = "hello-world-genai"
-version = "0.3.0" # for APAN5560 course Assignment 3 - Added VAE and GAN support
-description = "FastAPI application with Bigram Text Generation, Word Embeddings, CIFAR-10 Image Classification, VAE, and GAN"
+version = "0.4.1" # for APAN5560 course Assignment 4 - Diffusion & EBM models
+description = "FastAPI application with Bigram/RNN Text Generation, Word Embeddings, CIFAR-10 Image Classification, VAE, GAN, Diffusion, and EBM"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -15,4 +15,12 @@ dependencies = [
     "pillow>=10.0.0",
     "python-multipart>=0.0.6",
     "matplotlib>=3.7.0",
+    "requests>=2.31.0",
+    "tqdm>=4.65.0",  # Progress bars for training
+]
+
+# spaCy model - must be downloaded after installing dependencies
+[project.optional-dependencies]
+spacy-model = [
+    "en-core-web-lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl",
 ]

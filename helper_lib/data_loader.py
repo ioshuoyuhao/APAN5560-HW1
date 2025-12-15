@@ -8,7 +8,7 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
 
-def get_data_loader(data_dir, batch_size=32, train=True, image_size=None):
+def get_data_loader(data_dir, batch_size=32, train=True, image_size=None, normalize_to_minus_one=False):
     """
     Create and return a data loader for CIFAR-10 dataset.
     
@@ -19,6 +19,8 @@ def get_data_loader(data_dir, batch_size=32, train=True, image_size=None):
         image_size (int or tuple, optional): Resize images to this size. 
             If None, uses original CIFAR-10 size (32×32).
             For AssignmentCNN, use image_size=64.
+        normalize_to_minus_one (bool): If True, normalize to [-1, 1] range (for EBM/Diffusion).
+                                       If False, keep in [0, 1] range. Default is False.
     
     Returns:
         DataLoader: PyTorch DataLoader for the specified dataset.
@@ -34,6 +36,10 @@ def get_data_loader(data_dir, batch_size=32, train=True, image_size=None):
     
     # Always convert to tensor
     transform_list.append(transforms.ToTensor())
+    
+    # Normalize to [-1, 1] if requested (for EBM/Diffusion models)
+    if normalize_to_minus_one:
+        transform_list.append(transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]))
     
     # Compose transforms
     transform = transforms.Compose(transform_list)
