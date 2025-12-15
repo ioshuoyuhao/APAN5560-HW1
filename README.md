@@ -2,7 +2,7 @@
 
 APAN 5560 Applied Generative AI
 
-This repository contains the FastAPI application with MNIST GAN for generating handwritten digits, built as part of Assignment 3
+This repository contains the FastAPI application that use the MNIST dataset to train a GAN model to generate hand-written digits
 
 ---
 
