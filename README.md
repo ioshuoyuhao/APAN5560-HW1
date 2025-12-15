@@ -173,7 +173,7 @@ Generator saved to: ./models/mnist_gan_generator.pth
 
 ### Using Swagger UI
 
-1. Visit http://127.0.0.1:8000/docs
+1. Visit 'http://127.0.0.1:8000/docs' (if run with uv) OR 'http://localhost:8000/docs' (if run with docker)
 2. Navigate to **GAN** section
 3. Try these endpoints:
 
