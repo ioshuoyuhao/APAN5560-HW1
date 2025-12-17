@@ -244,7 +244,12 @@ uv pip install en-core-web-lg@https://github.com/explosion/spacy-models/releases
 
 **Solution:** Use different port or kill processes:
 ```bash
+# if run with uv
 uv run fastapi dev app/main.py --port 8001
+
+# else if run with docker
+docker run -p 8001:8000 hello-world-genai
+```
 
 ---
 
