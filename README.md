@@ -162,7 +162,11 @@ uv pip install en-core-web-lg@https://github.com/explosion/spacy-models/releases
 ### Step 3: Run the API
 
 ```bash
+# if run with uv
 uv run fastapi dev app/main.py
+
+# OR if run via docker
+docker run -p 8000:8000 hello_world_genai
 ```
 
 **Expected output:**
