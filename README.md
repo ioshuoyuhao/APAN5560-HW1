@@ -58,7 +58,7 @@ docker run -p 8000:8000 hello_world_genai
 
 ## Access the API Server
 
-Then for development mode at localhost,
+Then for development mode run with uv,
  visit:
 - http://127.0.0.1:8000 - API root
 - http://127.0.0.1:8000/docs - Interactive API documentation (Swagger UI)
