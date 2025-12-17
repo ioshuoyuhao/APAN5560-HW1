@@ -1,7 +1,7 @@
 [project]
 name = "hello-world-genai"
-version = "0.4.1" # for APAN5560 course Assignment 4 - Diffusion & EBM models
-description = "FastAPI application with Bigram/RNN Text Generation, Word Embeddings, CIFAR-10 Image Classification, VAE, GAN, Diffusion, and EBM"
+version = "0.5.0"  # HW5 - Added RL-based LLM fine-tuning with PPO
+description = "FastAPI application with Bigram/RNN/LLM/LLM-RL Text Generation, Word Embeddings, CIFAR-10 Image Classification, VAE, GAN, Diffusion, and EBM"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -17,6 +17,10 @@ dependencies = [
     "matplotlib>=3.7.0",
     "requests>=2.31.0",
     "tqdm>=4.65.0",  # Progress bars for training
+    "transformers>=4.36.0",  # HuggingFace Transformers for GPT2
+    "datasets>=2.16.0",  # HuggingFace Datasets for SQuAD Q&A dataset
+    "accelerate>=0.25.0",  # For efficient model loading
+    "huggingface_hub>=0.20.0",  # For uploading models to HuggingFace Hub (HW5)
 ]
 
 # spaCy model - must be downloaded after installing dependencies

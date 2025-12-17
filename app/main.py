@@ -9,12 +9,14 @@ from app.gan_model import MNISTGANGenerator
 from app.rnn_model import RNNTextGenerator
 from app.diffusion_model import DiffusionImageGenerator
 from app.ebm_model import EBMImageGenerator
+from app.llm_model import LLMTextGenerator
+from app.llm_rl_model import LLMRLGenerator
 import base64
 
 app = FastAPI(
     title="Hello World GenAI API",
-    description="FastAPI application with Bigram/RNN Text Generation, Word Embeddings, Image Classification, MNIST GAN, Diffusion, and EBM (MNIST + CIFAR-10)",
-    version="0.4.1"  # HW4 - Added Diffusion and EBM image generators with CIFAR-10 support
+    description="FastAPI application with Bigram/RNN/LLM/LLM-RL Text Generation, Word Embeddings, Image Classification, MNIST GAN, Diffusion, and EBM (MNIST + CIFAR-10)",
+    version="0.5.0"  # HW5 - Added RL-based LLM fine-tuning with GPT2 for Q&A using PPO
 )
 
 # Sample corpus for the bigram model
@@ -64,6 +66,25 @@ ebm_generator = EBMImageGenerator(
     model_path="models/ebm_cifar10_best.pth"
 )
 
+# Initialize LLM (GPT2) text generator (Module 9 - Fine-tuned GPT2 for Q&A)
+# Model path can be set to load fine-tuned weights
+llm_generator = LLMTextGenerator(
+    model_name="openai-community/gpt2",
+    model_path="models/llm_finetuned.pth",
+    max_length=128
+)
+
+# Initialize LLM-RL (GPT2 with RL/PPO) text generator (HW5 - RL fine-tuned GPT2 for Q&A)
+# Uses SQuAD dataset and shaped rewards for response format
+# Priority: local model_path > HuggingFace Hub > pretrained base model
+# Public HF repos don't require authentication token for downloading
+llm_rl_generator = LLMRLGenerator(
+    model_name="openai-community/gpt2",
+    model_path="models/llm_rl_finetuned.pth",
+    max_length=256,
+    hf_repo="StevenHuo/StevenHuo-gpt2-squad-rl"  # HW5: Public HF Hub repo
+)
+
 
 # ============== Request Models ==============
 
@@ -110,6 +131,23 @@ class EBMGenerateRequest(BaseModel):
     noise_std: float = 0.01
 
 
+class LLMTextGenerationRequest(BaseModel):
+    """Request model for LLM text generation endpoint."""
+    start_word: str  # The prompt/question to generate from
+    length: int = 50  # Number of new tokens to generate
+    temperature: float = 1.0  # Sampling temperature (higher = more random)
+    top_k: int = 50  # Top-k sampling parameter
+    top_p: float = 0.95  # Top-p (nucleus) sampling parameter
+
+
+class LLMRLTextGenerationRequest(BaseModel):
+    """Request model for RL-trained LLM text generation endpoint (HW5)."""
+    question: str  # The question to answer
+    context: str = ""  # Optional context for the question
+    max_tokens: int = 100  # Number of new tokens to generate
+    temperature: float = 0.8  # Sampling temperature
+
+
 # ============== Endpoints ==============
 
 @app.get("/")
@@ -151,6 +189,86 @@ def generate_with_rnn(request: RNNTextGenerationRequest):
         return {"generated_text": generated_text}
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate_with_llm")
+def generate_with_llm(request: LLMTextGenerationRequest):
+    """
+    Generate text using fine-tuned GPT2 (LLM) language model.
+    
+    The model is fine-tuned on the Nectar Q&A dataset from HuggingFace
+    and uses Transformer architecture for question-answering text generation.
+    
+    Reference: https://huggingface.co/docs/transformers/en/index
+    
+    - **start_word**: The prompt/question to generate from
+    - **length**: Number of new tokens to generate (default: 50)
+    - **temperature**: Sampling temperature (default: 1.0, higher = more random)
+    - **top_k**: Top-k sampling parameter (default: 50)
+    - **top_p**: Top-p (nucleus) sampling parameter (default: 0.95)
+    """
+    try:
+        generated_text = llm_generator.generate_text(
+            prompt=request.start_word,
+            max_new_tokens=request.length,
+            temperature=request.temperature,
+            top_k=request.top_k,
+            top_p=request.top_p
+        )
+        return {"generated_text": generated_text}
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/llm/info")
+def get_llm_info():
+    """
+    Get information about the LLM (GPT2) model.
+    """
+    return llm_generator.get_model_info()
+
+
+# ============== RL-trained LLM Endpoints (Assignment 5) ==============
+
+@app.post("/generate_with_llm_rl")
+def generate_with_llm_rl(request: LLMRLTextGenerationRequest):
+    """
+    Generate text using RL-trained GPT2 (LLM) language model.
+    
+    HW5: The model is fine-tuned using Reinforcement Learning (PPO) on the 
+    SQuAD dataset. It generates responses with a specific format:
+    - Starts with: "That is a great question! "
+    - Ends with: " Let me know if you have any other questions."
+    
+    Training Method: PPO (Proximal Policy Optimization) from Module 10 & 11
+    Dataset: SQuAD (https://huggingface.co/datasets/rajpurkar/squad)
+    
+    - **question**: The question to answer
+    - **context**: Optional context for the question
+    - **max_tokens**: Number of new tokens to generate (default: 100)
+    - **temperature**: Sampling temperature (default: 0.8)
+    """
+    try:
+        generated_text = llm_rl_generator.generate_text(
+            question=request.question,
+            context=request.context,
+            max_new_tokens=request.max_tokens,
+            temperature=request.temperature
+        )
+        return {"generated_text": generated_text}
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/llm_rl/info")
+def get_llm_rl_info():
+    """
+    Get information about the RL-trained LLM (GPT2 with PPO) model.
+    
+    HW5: Displays model info including training method, response format,
+    and dataset used for fine-tuning.
+    """
+    return llm_rl_generator.get_model_info()
 
 
 @app.post("/embedding")

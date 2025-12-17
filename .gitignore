@@ -18,3 +18,15 @@ wheels/
 # Large dataset files (CIFAR-10, MNIST, etc.)
 data/*
 !data/.gitkeep
+
+# HuggingFace cache directories (GPT2 model ~500MB, datasets)
+models/huggingface_cache/
+data/huggingface_datasets/
+
+# Fine-tuned LLM model (too large to commit, around 500MB)
+models/llm_finetuned.pth
+models/llm_rl_finetuned.pth
+
+# HuggingFace upload directory (for RL-trained model for Assignment 5)
+models/hf_upload_rl/
+

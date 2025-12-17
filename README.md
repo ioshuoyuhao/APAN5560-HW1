@@ -1,8 +1,12 @@
-# Assignment 4: Advanced Image Generation
+# Assignment 5: Post-training an LLM
 
 APAN 5560 Applied Generative AI
 
-This repository contains a FastAPI application with multiple generative AI models including Diffusion Models and Energy-Based Models (EBMs) for image generation on CIFAR-10 dataset, built as part of Assignment 4.
+This repository contains a FastAPI application with multiple generative AI models including:
+- **HW5 (NEW):** GPT2 fine-tuned with Reinforcement Learning (PPO) for Question-Answering
+- Diffusion Models and Energy-Based Models (EBMs) for image generation
+- RNN/LSTM text generation, CNN classification, GAN digit generation
+- etc
 
 ---
 
@@ -23,8 +27,8 @@ rm -rf .venv && uv venv
 uv sync
 uv pip install en-core-web-lg@https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl
 
-# Run the API
-uv run fastapi dev app/main.py
+# Run the API (avoid using dev mode)
+uv run fastapi run app/main.py 
 ```
 
 **Access the API (uv):**
@@ -45,13 +49,43 @@ docker run -p 8000:8000 hello_world_genai
 
 ---
 
+## HuggingFace Hub Model Overview
+
+The RL-trained GPT2 model for HW5 is available on HuggingFace Hub:
+
+🤗 **[StevenHuo/StevenHuo-gpt2-squad-rl](https://huggingface.co/StevenHuo/StevenHuo-gpt2-squad-rl)**
+
+Users cloning this Github repository and run the app can automatically download the model from HuggingFace Hub (no local training required for inference).
+
+---
+
+#### Test the API
+```bash
+# Run FastAPI server (if via docker)
+docker run -p 8000:8000 hello_world_genai
+
+# Test endpoint via curl
+curl -X POST "http://localhost:8000/generate_with_llm_rl" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is the capital of France?", "context": "France is a country in Western Europe. Its capital is Paris."}'
+```
+
+### HW5 API Endpoints 
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/generate_with_llm_rl` | POST | Generate Q&A response with RL-trained model |
+| `/llm_rl/info` | GET | Get RL model information |
+
+---
+
 ## Project Structure
 
 ```
 hello_world_genai/
 │
 ├── README.md                           # This file
-├── pyproject.toml                      # Dependencies (v0.4.1)
+├── pyproject.toml                      # Dependencies (v0.5.0)
 ├── uv.lock                             # Dependency lock file
 ├── Dockerfile                          # Docker configuration
 ├── .gitignore                          # Git ignore rules
@@ -66,7 +100,9 @@ hello_world_genai/
 │   ├── classifier_model.py             # CIFAR-10 image classifier
 │   ├── gan_model.py                    # MNIST GAN generator (Assignment 3)
 │   ├── diffusion_model.py              # Diffusion image generator (Assignment 4)
-│   └── ebm_model.py                    # Energy-Based Model generator (Assignment 4)
+│   ├── ebm_model.py                    # Energy-Based Model generator (Assignment 4)
+│   ├── llm_model.py                    # GPT2 fine-tuned for Q&A (Module 9)
+│   └── llm_rl_model.py                 # GPT2 + RL (PPO) for Q&A (Assignment 5) 
 │
 ├── helper_lib/                         # Reusable Neural Network Helper Library
 │   ├── __init__.py                     # Package initialization
@@ -82,7 +118,9 @@ hello_world_genai/
 │   ├── train_mnist_gan.py              # MNIST GAN training script (Assignment 3)
 │   ├── train_diffusion_cifar10.py      # Diffusion model training (Assignment 4)
 │   ├── train_ebm_cifar10.py            # EBM training script (Assignment 4)
-│   └── test_ebm_generate.py            # Quick test for EBM generation
+│   ├── test_ebm_generate.py            # Quick test for EBM generation
+│   ├── train_llm.py                    # GPT2 fine-tuning script (Module 9)
+│   └── train_llm_rl.py                 # GPT2 + RL (PPO) training (Assignment 5) 
 │
 ├── models/                             # Trained model weights
 │   ├── assignment_cnn.pth              # Trained CNN model
@@ -91,67 +129,21 @@ hello_world_genai/
 │   ├── diffusion_checkpoints/          # Diffusion training checkpoints
 │   │   └── diffusion_best.pth          # Best Diffusion model (Assignment 4)
 │   ├── ebm_cifar10_checkpoints/        # EBM training checkpoints
-│   └── ebm_cifar10_best.pth            # EBM for CIFAR-10 (Assignment 4)
+│   ├── ebm_cifar10_best.pth            # EBM for CIFAR-10 (Assignment 4)
+│   ├── llm_finetuned.pth               # Fine-tuned GPT2 (Module 9)
+│   ├── llm_rl_finetuned.pth            # RL-trained GPT2 (Assignment 5) 
+│   └── huggingface_cache/              # HuggingFace model cache (gitignored)
 │
 └── data/                               # Dataset storage (gitignored)
     ├── .gitkeep                        # Keep directory in git
     ├── MNIST/                          # MNIST dataset (auto-downloaded)
-    └── cifar-10-batches-py/            # CIFAR-10 dataset (auto-downloaded)
+    ├── cifar-10-batches-py/            # CIFAR-10 dataset (auto-downloaded)
+    └── huggingface_datasets/           # HuggingFace datasets cache (gitignored)
 ```
 
 ---
 
-## Assignment 4: Diffusion & Energy-Based Models
-
-### Part 1: Diffusion Model (trained by CIFAR-10 dataset)
-
-A UNet-based Diffusion Model that learns to generate images by reversing a noise diffusion process.
-
-#### Architecture
-- **Input:** 64×64 RGB images (resized from CIFAR-10 32×32)
-- **UNet Backbone:**
-  - Encoder: DownBlocks with residual connections
-  - Bottleneck: ResidualBlocks
-  - Decoder: UpBlocks with skip connections
-- **Sinusoidal Embedding:** Encodes noise variance at each timestep
-- **Diffusion Schedule:** Offset Cosine schedule for better sample quality
-- **EMA:** Exponential Moving Average for stable sampling
-
-#### Key Components
-```
-DiffusionModel
-├── UNet (neural network backbone)
-│   ├── SinusoidalEmbedding
-│   ├── DownBlocks (encoder)
-│   ├── ResidualBlocks (bottleneck)
-│   └── UpBlocks (decoder)
-├── Diffusion Schedule (noise/signal rates)
-├── EMA UNet (for inference)
-└── Normalizer (input normalization)
-```
-
-### Part 2: Energy-Based Model (trained by CIFAR-10 dataset)
-
-An Energy-Based Model that learns an energy function mapping images to scalar values, using Langevin dynamics for sampling.
-
-#### Architecture
-- **Input:** 32×32 RGB images (CIFAR-10)
-- **CNN Energy Function:**
-  - Conv2d: in_channels → 16, k=5, s=2, p=2 + Swish
-  - Conv2d: 16 → 32, k=3, s=2, p=1 + Swish
-  - Conv2d: 32 → 64, k=3, s=2, p=1 + Swish
-  - Conv2d: 64 → 64, k=3, s=2, p=1 + Swish
-  - Flatten + Linear: 256 → 64 → 1
-- **Output:** Scalar energy value
-
-#### Training Method
-- **Loss:** Contrastive Divergence (minimize real energy, maximize fake energy)
-- **Sampling:** Langevin Dynamics with gradient descent
-- **Buffer:** Sample buffer for efficient training
-
----
-
-## API Endpoints
+## Other API Endpoints from previous Assignments
 
 ### Diffusion Model Endpoints (Assignment 4)
 
@@ -172,7 +164,21 @@ An Energy-Based Model that learns an energy function mapping images to scalar va
 | `/ebm/info` | GET | Get EBM model info |
 
 
-### Other Endpoints
+### LLM RL Endpoints (Assignment 5) 
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/generate_with_llm_rl` | POST | Generate Q&A response with RL-trained GPT2 |
+| `/llm_rl/info` | GET | Get RL model information |
+
+### LLM Endpoints (Module 9)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/generate_with_llm` | POST | Generate text using fine-tuned GPT2 |
+| `/llm/info` | GET | Get LLM model information |
+
+### Rest of previous Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -190,93 +196,39 @@ An Energy-Based Model that learns an energy function mapping images to scalar va
 
 
 ---
-
-## Model Training workflow for reference
-
-### Train Diffusion Model (CIFAR-10)
+### Fine-Tune LLM with RL (Assignment 5) workflow for reference 
 
 ```bash
 cd hello_world_genai
-source .venv/bin/activate  # or: uv run python ...
-python scripts/train_diffusion_cifar10.py
+source .venv/bin/activate  # or use: uv run python ...
+python scripts/train_llm_rl.py --epochs 3 --num_samples 300
 ```
 
 **Configuration:**
-- Image size: 64×64 (resized from 32×32)
-- Batch size: 64
-- Epochs: 50
-- Learning rate: 1e-4
-- Loss: L1 (MAE)
+- Base Model: `openai-community/gpt2`
+- Dataset: SQuAD (Stanford Question Answering Dataset)
+- Training Method: PPO (Proximal Policy Optimization)
+- Batch size: 1 (for MPS/GPU memory constraints)
+- Learning rate: 1e-5
+- Epochs: 3
 
-**Output:** `models/diffusion_best.pth`
+**Output:** `models/llm_rl_finetuned.pth`
 
-### Train EBM (CIFAR-10)
-
+**Upload to HuggingFace Hub:**
 ```bash
-cd hello_world_genai
-source .venv/bin/activate
-python scripts/train_ebm_cifar10.py
+# Login first
+python -c "from huggingface_hub import login; login()"
+
+# Upload (skips training if trained model already exists)
+python scripts/train_llm_rl.py --skip_training --upload_to_hub "StevenHuo/StevenHuo-gpt2-squad-rl"
 ```
-
-**Configuration:**
-- Image size: 32×32 RGB
-- Batch size: 64
-- Epochs: 30
-- Learning rate: 1e-4
-- Langevin steps: 60
-- Step size: 10.0
-
-**Output:** `models/ebm_cifar10_best.pth`
 
 ### Training Notes
 
 ⚠️ **Training Time:**
-- Diffusion Model: ~1-2 hours on GPU, ~4-6 hours on CPU
-- EBM: ~2-4 hours on GPU (Langevin sampling is slow)
-
-💡 **Tips:**
-- Use GPU (CUDA/MPS) for faster training
-- Monitor loss curves for convergence
-- Adjust epochs based on available time
-
+- LLM RL (HW5): ~30-60 minutes on MPS/GPU with 300 samples
 ---
 
-## Testing the API
-
-### Using Swagger UI
-
-1. Visit http://127.0.0.1:8000/docs ( Suppose you run API server by uv)
-2. Navigate to the desired section (Diffusion, EBM, GAN)
-3. Try the endpoints
-
-#### Generate Diffusion Image
-- Expand `GET /diffusion/generate/image`
-- Set `diffusion_steps=100` (more = better quality)
-- Click "Execute"
-
-#### Generate EBM Image Grid (CIFAR-10)
-- Expand `GET /ebm/generate/grid`
-- Set `num_samples=9`, `nrow=3`, `steps=256`
-- Click "Execute"
-
-### Using curl
-
-```bash
-# Generate single Diffusion image
-curl "http://127.0.0.1:8000/diffusion/generate/image?diffusion_steps=100" --output diffusion.png
-
-# Generate EBM CIFAR-10 image
-curl "http://127.0.0.1:8000/ebm/generate/image?steps=256" --output ebm_cifar10.png
-
-# Get Diffusion model info
-curl http://127.0.0.1:8000/diffusion/info
-
-# Get EBM model info
-curl http://127.0.0.1:8000/ebm/info
-```
-
-
----
 
 ## Troubleshooting for common issue when running FastAPI
 
@@ -304,11 +256,14 @@ uv pip install en-core-web-lg@https://github.com/explosion/spacy-models/releases
 
 **Solution:** Use different port or kill processes:
 ```bash
+# if run with uv
 uv run fastapi dev app/main.py --port 8001
 
+# else if run with docker
+docker run -p 8001:8000 hello-world-genai
+```
 
 ---
-
 
 ## Requirements
 
@@ -320,5 +275,9 @@ uv run fastapi dev app/main.py --port 8001
 - matplotlib >= 3.7.0
 - Pillow
 - tqdm
+- transformers >= 4.30.0 (HW5: HuggingFace Transformers for GPT2)
+- datasets >= 2.14.0 (HW5: HuggingFace Datasets for SQuAD)
+- huggingface_hub >= 0.16.0 (HW5: Upload models to HuggingFace Hub)
+- accelerate >= 0.21.0 (HW5: Efficient model training)
 
 ---
