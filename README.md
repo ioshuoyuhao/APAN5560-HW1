@@ -56,6 +56,8 @@ docker build -t hello_world_genai .
 docker run -p 8000:8000 hello_world_genai
 ```
 
+## Access the API Server
+
 Then for development mode at localhost,
  visit:
 - http://127.0.0.1:8000 - API root
@@ -63,6 +65,6 @@ Then for development mode at localhost,
 
 for docker deployment, 
 visit:     
-server   Server started at http://0.0.0.0:8000
-server   Documentation at http://0.0.0.0:8000/docs
+- server   Server started at http://localhost:8000
+- server   Documentation at http://localhost:8000/docs
 
