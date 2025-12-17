@@ -163,14 +163,6 @@ hello_world_genai/
 | `/ebm/generate/image` | GET | Generate single RGB image (PNG) |
 | `/ebm/info` | GET | Get EBM model info |
 
-
-### LLM RL Endpoints (Assignment 5) 
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/generate_with_llm_rl` | POST | Generate Q&A response with RL-trained GPT2 |
-| `/llm_rl/info` | GET | Get RL model information |
-
 ### LLM Endpoints (Module 9)
 
 | Endpoint | Method | Description |
