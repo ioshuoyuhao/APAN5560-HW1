@@ -11,6 +11,7 @@ This repository contains the helper library for Module 4: Modern Deep Learning A
 
 > **Prerequisites:** Python 3.12+, [uv](https://docs.astral.sh/uv/) package manager
 
+## Run API with uv: 
 ```bash
 # Clone and navigate to API directory
 git clone <repository-url>
@@ -29,6 +30,19 @@ uv run fastapi dev app/main.py
 **Access the API:**
 - Swagger UI: http://127.0.0.1:8000/docs
 - API Root: http://127.0.0.1:8000
+
+
+## Run API by Docker Deployment 
+
+```bash
+cd hello_world_genai
+docker build -t hello_world_genai .
+docker run -p 8000:8000 hello_world_genai
+```
+
+Visit:
+- **Swagger UI**: http://localhost:8000/docs
+- **API Root**: http://localhost:8000
 
 ---
 
@@ -157,25 +171,19 @@ INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
 INFO:     Application startup complete.
 ```
 
-### Step 4: Test the API
+### Step 4: Test the API 
+#### (if run with uv)
 
 - **Swagger UI**: http://127.0.0.1:8000/docs
 - **API Root**: http://127.0.0.1:8000
 - **ReDoc**: http://127.0.0.1:8000/redoc
 
----
-
-## Run API by Docker Deployment 
-
-```bash
-cd hello_world_genai
-docker build -t hello_world_genai .
-docker run -p 8000:8000 hello_world_genai
-```
+#### (if run with docker)
 
 Visit:
-- **Swagger UI**: http://0.0.0.0:8000/docs
-
+- **Swagger UI**: http://localhost:8000/docs
+- **API Root**: http://localhost:8000
+- 
 ---
 
 ## Troubleshooting
